@@ -10,6 +10,7 @@ import tensorflow as tf
 from WGAN import WGAN
 from CaloLatent import CaloLatent
 import time
+import horovod.tensorflow.keras as hvd
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
@@ -57,6 +58,7 @@ if flags.sample:
         print(end - start)
         
     elif flags.model == 'vae':
+        hvd.init()
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
                            config=config)
         model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
