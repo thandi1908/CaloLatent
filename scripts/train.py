@@ -11,6 +11,7 @@ import utils
 from CaloLatent import CaloLatent
 import tensorflow_addons as tfa
 import gc
+import pickle
 
 if __name__ == '__main__':
     hvd.init()
@@ -30,9 +31,20 @@ if __name__ == '__main__':
     parser.add_argument('--nevts', type=float,default=-1, help='Number of events to load')
     parser.add_argument('--frac', type=float,default=0.8, help='Fraction of total events used for training')
     parser.add_argument('--load', action='store_true', default=False,help='Load pretrained weights to continue the training')
+
+    # adding flags for experimentation
+    parser.add_argument('--noise_dims', type=int,default=None, help='Dimensionality of latent space')
+
     flags = parser.parse_args()
 
     config = utils.LoadJson(flags.config)
+    
+    # experiment parameters
+    if flags.noise_dims:
+        config['NOISE_DIM'] = flags.noise_dims
+
+    print(f"Trianing with {config['NOISE_DIM']} noise dims")   
+    
     data = []
     energies = []
     for dataset in config['FILES']:
@@ -108,11 +120,11 @@ if __name__ == '__main__':
         )
         
     if flags.load:
-        checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["NOISE_DIM"])
         model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
 
     if hvd.rank()==0:
-        checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["NOISE_DIM"])
         checkpoint = ModelCheckpoint('{}/checkpoint'.format(checkpoint_folder),
                                      save_best_only=True,mode='auto',
                                      period=1,save_weights_only=True)
@@ -124,14 +136,22 @@ if __name__ == '__main__':
         steps_per_epoch=int(data_size*flags.frac/BATCH_SIZE),
         validation_data=test_data.batch(BATCH_SIZE),
         validation_steps=int(data_size*(1-flags.frac)/BATCH_SIZE),
-        verbose=1 if hvd.rank()==0 else 0,
+        verbose=2 if hvd.rank()==0 else 2,
         callbacks=callbacks
     )
 
-
+    
     if hvd.rank()==0:
-        checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
+        #save losses for plotting
+        history_folder = f'../trainingmetrics_{config["CHECKPOINT_NAME"]}_epochs{config["MAXEPOCH"]}_ld{config["NOISE_DIM"]}_{flags.model}'
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["NOISE_DIM"])
         if not os.path.exists(checkpoint_folder):
             os.makedirs(checkpoint_folder)
+        
+        if not os.path.exists(history_folder):
+            os.makedirs(history_folder)
+        
+        with open(f'{history_folder}/training_history.pickle', 'wb') as handle: pickle.dump(history.history, handle)
+        
         os.system('cp CaloLatent.py {}'.format(checkpoint_folder)) # bkp of model def
         os.system('cp JSON/{} {}'.format(flags.config,checkpoint_folder)) # bkp of config file
