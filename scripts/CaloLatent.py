@@ -43,8 +43,8 @@ class CaloLatent(keras.Model):
 
         self.activation = tf.keras.activations.swish
         
-        self.kl_steps=100*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
-        self.warm_up_steps = 100*624//hvd.size() #number of steps to train the VAE alone
+        self.kl_steps=int(150*624//hvd.size()) #Number of optimizer steps to take before kl is multiplied by 1
+        self.warm_up_steps = int(10e15*624//hvd.size()) #number of steps to train the VAE alone
         self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank        
 
         if len(self.data_shape) == 2:
@@ -446,10 +446,10 @@ class CaloLatent(keras.Model):
             kl_loss_joint = cross_entropy + vae_neg_entropy 
             kl_loss_disjoint = vae_neg_entropy - vae_logp
             
-            kl_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
-                              lambda: kl_loss_joint,lambda:kl_loss_disjoint)
+            # kl_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+            #                   lambda: kl_loss_joint,lambda:kl_loss_disjoint)
             
-            kl_loss = kl_loss_joint
+            kl_loss = kl_loss_disjoint
             kl_loss = tf.reduce_mean(kl_loss)
 
             
@@ -532,11 +532,11 @@ class CaloLatent(keras.Model):
         kl_loss_joint = cross_entropy + vae_neg_entropy 
         kl_loss_disjoint = vae_neg_entropy - vae_logp
             
-        kl_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
-                          lambda: kl_loss_joint,lambda:kl_loss_disjoint)
+        # kl_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+        #                   lambda: kl_loss_joint,lambda:kl_loss_disjoint)
 
             
-        kl_loss = tf.reduce_mean(kl_loss)
+        kl_loss = tf.reduce_mean(kl_loss_disjoint)
 
             
         #Simple linear scaling

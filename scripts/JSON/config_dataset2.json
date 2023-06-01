@@ -7,7 +7,7 @@
     'PAD':[[2,1],[0,0],[2,1]],
     'LR':1e-3,
     'LR_score':4e-4,
-    'MAXEPOCH':100,
+    'MAXEPOCH':500,
     'EARLYSTOP':20,
     'EMBED':64,
     'CHECKPOINT_NAME':'dataset2',
