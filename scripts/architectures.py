@@ -3,7 +3,7 @@ from tensorflow import keras
 from tensorflow.keras import layers, Input
 import numpy as np
 import tensorflow_addons as tfa
-from tfa.layers import SpectralNormalization
+from tensorflow_addons.layers import SpectralNormalization
 
 
 def Encoder(
@@ -29,24 +29,24 @@ def Encoder(
                 residual = x
             else:
                 if use_1D:
-                    residual = layers.Conv1D(width, kernel_size=1)(x)
+                    residual = SpectralNormalization(layers.Conv1D(width, kernel_size=1))(x)
                 else:
-                    residual = layers.Conv3D(width, kernel_size=1)(x)
+                    residual = SpectralNormalization(layers.Conv3D(width, kernel_size=1))(x)
 
-            n = layers.Dense(width)(n)
+            n = SpectralNormalization(layers.Dense(width))(n)
             # x = tfa.layers.GroupNormalization(groups=4)(x)
             x = act(x)
             if use_1D:
-                x = layers.Conv1D(width, kernel_size=kernel, padding="same")(x)
+                x = SpectralNormalization(layers.Conv1D(width, kernel_size=kernel, padding="same"))(x)
             else:
-                x = layers.Conv3D(width, kernel_size=kernel, padding="same")(x)
+                x = SpectralNormalization(layers.Conv3D(width, kernel_size=kernel, padding="same"))(x)
             x = layers.Add()([x, n])
             # x = tfa.layers.GroupNormalization(groups=4)(x)
             x = act(x)
             if use_1D:
-                x = layers.Conv1D(width, kernel_size=kernel, padding="same")(x)
+                x = SpectralNormalization(layers.Conv1D(width, kernel_size=kernel, padding="same"))(x)
             else:
-                x = layers.Conv3D(width, kernel_size=kernel, padding="same")(x)
+                x = SpectralNormalization(layers.Conv3D(width, kernel_size=kernel, padding="same"))(x)
             x = layers.Add()([residual, x])
 
             if attention:
@@ -85,11 +85,11 @@ def Encoder(
     
     if use_1D:
         #No padding to 1D model
-        x = layers.Conv1D(input_embedding_dims, kernel_size=1)(inputs)
+        x = SpectralNormalization(layers.Conv1D(input_embedding_dims, kernel_size=1))(inputs)
         n = layers.Reshape((1,time_embedding.shape[-1]))(time_embedding)
     else:
         inputs_padded = layers.ZeroPadding3D(pad)(inputs)
-        x = layers.Conv3D(input_embedding_dims, kernel_size=1)(inputs_padded)
+        x = SpectralNormalization(layers.Conv3D(input_embedding_dims, kernel_size=1))(inputs_padded)
         n = layers.Reshape((1,1,1,time_embedding.shape[-1]))(time_embedding)
     
     for width, attention in zip(widths[:-1], attentions[:-1]):
@@ -126,24 +126,24 @@ def Decoder(
                 residual = x
             else:
                 if use_1D:
-                    residual = layers.Conv1D(width, kernel_size=1)(x)
+                    residual = SpectralNormalization(layers.Conv1D(width, kernel_size=1))(x)
                 else:
-                    residual = layers.Conv3D(width, kernel_size=1)(x)
+                    residual = SpectralNormalization(layers.Conv3D(width, kernel_size=1))(x)
 
             n = layers.Dense(width)(n)
             # x = tfa.layers.GroupNormalization(groups=4)(x)
             x = act(x)
             if use_1D:
-                x = layers.Conv1D(width, kernel_size=kernel, padding="same")(x)
+                x = SpectralNormalization(layers.Conv1D(width, kernel_size=kernel, padding="same"))(x)
             else:
-                x = layers.Conv3D(width, kernel_size=kernel, padding="same")(x)
+                x = SpectralNormalization(layers.Conv3D(width, kernel_size=kernel, padding="same"))(x)
             x = layers.Add()([x, n])
             # x = tfa.layers.GroupNormalization(groups=4)(x)
             x = act(x)
             if use_1D:
-                x = layers.Conv1D(width, kernel_size=kernel, padding="same")(x)
+                x = SpectralNormalization(layers.Conv1D(width, kernel_size=kernel, padding="same"))(x)
             else:
-                x = layers.Conv3D(width, kernel_size=kernel, padding="same")(x)
+                x = SpectralNormalization(layers.Conv3D(width, kernel_size=kernel, padding="same"))(x)
             x = layers.Add()([residual, x])
 
             if attention:
@@ -206,12 +206,12 @@ def Resnet(
 
     def resnet_dense(input_layer,hidden_size):
         layer,time = input_layer
-        residual = layers.Dense(hidden_size)(layer)
-        embed =  layers.Dense(hidden_size)(time)
+        residual = SpectralNormalization(layers.Dense(hidden_size))(layer) # might be overkill to add the spectral norm to the these layers
+        embed =  SpectralNormalization(layers.Dense(hidden_size))(time)
         x = act(layer)
-        x = layers.Dense(hidden_size)(x)
+        x = SpectralNormalization(layers.Dense(hidden_size))(x)
         x = act(layers.Add()([x, embed]))
-        x = layers.Dense(hidden_size)(x)
+        x = SpectralNormalization(layers.Dense(hidden_size))(x)
         x = layers.Add()([x, residual])
         return x
 
