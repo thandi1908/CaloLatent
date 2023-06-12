@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import json
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.callbacks import ReduceLROnPlateau,EarlyStopping,ModelCheckpoint
@@ -41,9 +42,9 @@ if __name__ == '__main__':
     
     # experiment parameters
     if flags.noise_dims:
-        config['NOISE_DIM'] = flags.noise_dims
+        config['LD_MULTI'] = flags.noise_dims
 
-    print(f"Trianing with {config['NOISE_DIM']} noise dims")   
+    print(f"Trianing with {config['LD_MULTI']} noise dims multiplier")   
     
     data = []
     energies = []
@@ -120,11 +121,11 @@ if __name__ == '__main__':
         )
         
     if flags.load:
-        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["NOISE_DIM"])
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["LD_MULTI"])
         model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
 
     if hvd.rank()==0:
-        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["NOISE_DIM"])
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["LD_MULTI"])
         checkpoint = ModelCheckpoint('{}/checkpoint'.format(checkpoint_folder),
                                      save_best_only=True,mode='auto',
                                      period=1,save_weights_only=True)
@@ -143,8 +144,8 @@ if __name__ == '__main__':
     
     if hvd.rank()==0:
         #save losses for plotting
-        history_folder = f'../trainingmetrics_{config["CHECKPOINT_NAME"]}_epochs{config["MAXEPOCH"]}_ld{config["NOISE_DIM"]}_{flags.model}'
-        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["NOISE_DIM"])
+        history_folder = f'../trainingmetrics_{config["CHECKPOINT_NAME"]}_epochs{config["MAXEPOCH"]}_ld{config["LD_MULTI"]}_{flags.model}'
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["LD_MULTI"])
         if not os.path.exists(checkpoint_folder):
             os.makedirs(checkpoint_folder)
         
@@ -154,4 +155,9 @@ if __name__ == '__main__':
         with open(f'{history_folder}/training_history.pickle', 'wb') as handle: pickle.dump(history.history, handle)
         
         os.system('cp CaloLatent.py {}'.format(checkpoint_folder)) # bkp of model def
+
+
+        with open(f"{checkpoint_folder}/{flags.config}_", "w") as f: # bkp of config file
+            json.dump(config, f)
+        
         os.system('cp JSON/{} {}'.format(flags.config,checkpoint_folder)) # bkp of config file

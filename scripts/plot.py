@@ -31,11 +31,20 @@ parser.add_argument('--model', default='vae', help='Model to train')
 parser.add_argument('--sample', action='store_true', default=False,help='Sample from learned model')
 parser.add_argument('--checkpoint', type=str, default=None, help='Which checkpoint folder to sample from')
 
+# adding flags for experimentation
+parser.add_argument('--noise_dims', type=int,default=None, help='Dimensionality of latent space')
+
 flags = parser.parse_args()
 
 nevts = int(flags.nevts)
 config = utils.LoadJson(flags.config)
 run_classifier=False
+
+# experiment parameters
+if flags.noise_dims:
+    config['LD_MULTI'] = flags.noise_dims
+
+print(f"Evaluating trianing with {config['LD_MULTI']} noise dims multiplier")
 
 if flags.sample:
     if flags.checkpoint:

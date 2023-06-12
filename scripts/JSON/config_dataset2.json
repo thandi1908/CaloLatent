@@ -19,4 +19,5 @@
     'logE':True,
     'MAXDEP':2,
     'NOISE_DIM':100,
+    'LD_MULTI':1
 }

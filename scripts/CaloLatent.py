@@ -97,6 +97,7 @@ class CaloLatent(keras.Model):
     def read_config(self):
         self.num_embed = self.config['EMBED']
         self.projection_dim = self.config['NOISE_DIM'] #latent space dimensionality
+        self.ld_multiplier = self.config['LD_MULTI']
         self.num_steps = self.config['NSTEPS']
         self.snr=self.config['SNR']
 
@@ -152,7 +153,7 @@ class CaloLatent(keras.Model):
             use_1D = True
             inputs,outputs = Encoder(
                 self.data_shape,
-                comd_embed,
+                cond_embed,
                 input_embedding_dims = 16,
                 stride=2,
                 kernel=3,
@@ -185,12 +186,12 @@ class CaloLatent(keras.Model):
 
             # print("last",layer_encoded)
             
-            z_mean = layers.Conv3D(1,kernel_size=1,padding="same",
+            z_mean = layers.Conv3D(self.ld_multiplier,kernel_size=1,padding="same",
                                    kernel_initializer=initializers.Zeros(),
                                    bias_initializer=initializers.Zeros(),
                                    strides=1,activation=None,use_bias=True)(outputs)
         
-            z_log_sig = layers.Conv3D(1,kernel_size=1,padding="same",
+            z_log_sig = layers.Conv3D(self.ld_multiplier,kernel_size=1,padding="same",
                                       kernel_initializer=initializers.Zeros(),
                                       bias_initializer=initializers.Zeros(),
                                       strides=1,activation=None,use_bias=True)(outputs)
@@ -205,6 +206,7 @@ class CaloLatent(keras.Model):
         
             z = Sampling()([z_mean, z_log_sig])
             self.latent_dim = z.shape[-1]
+            print(f"Model Latent Dimensions: {self.latent_dim}")
 
         return  inputs, z_mean, z_log_sig, z
 
@@ -554,11 +556,12 @@ class CaloLatent(keras.Model):
 
     
     def generate(self,nevts,cond):
+        print(f"Model latent dims at gen: {self.latent_dim}")
         random_latent_vectors = tf.random.normal(
             shape=(nevts, self.latent_dim)
         )
         
-        random_latent_vectors =self.PCSampler(cond,num_steps=self.num_steps,snr=self.snr)
+        # random_latent_vectors =self.PCSampler(cond,num_steps=self.num_steps,snr=self.snr)
         #random_latent_vectors =self.ODESampler(cond,atol=1e-5)
         
         mean,log_std= tf.split(self.decoder([random_latent_vectors,cond], training=False),num_or_size_splits=2, axis=-1)
