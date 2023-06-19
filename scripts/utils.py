@@ -210,17 +210,23 @@ def EnergyLoader(file_name,nevts,emax,emin,rank=0,logE=True):
 def DataLoader(file_name,shape,
                nevts,emax,emin,
                logE=True,
-               rank=0,size=1):
+               rank=0,size=1, debug=False):
     
     with h5.File(file_name,"r") as h5f:
         e = h5f['incident_energies'][rank:int(nevts):size].astype(np.float32)/1000.0 #in GeV
         shower = h5f['showers'][rank:int(nevts):size].astype(np.float32)/1000.0 # in GeV
         
-    # shower += np.random.uniform(0,1e-7,size=shower.shape)    
+    # shower += np.random.uniform(0,1e-7,size=shower.shape)   
+    print(f"Original Shower Shape: {shower.shape}") 
     shower = shower.reshape(shape)
+
+    print(f"Original mean: {np.average(shower,axis=0)}, std {np.std(shower,axis=0)}")
         
-    if logE:        
-        return shower,np.log10(e/emin)/np.log10(emax/emin)
+    if logE:
+        if debug:
+            return shower,np.log10(e/emin)/np.log10(emax/emin), np.average(shower,axis=0), np.std(shower,axis=0)
+        else:       
+            return shower,np.log10(e/emin)/np.log10(emax/emin)
     else:
         return shower,(e-emin)/(emax-emin)
         

@@ -555,12 +555,20 @@ class CaloLatent(keras.Model):
         }
 
     
-    def generate(self,nevts,cond):
+    def generate(self,nevts,cond, sample_enconder=False,data=None,batch_size=1000):
         print(f"Model latent dims at gen: {self.latent_dim}")
-        random_latent_vectors = tf.random.normal(
-            shape=(nevts, self.latent_dim)
-        )
-        
+        if sample_enconder:
+            print("Sampling directly from encoder Z")
+            data = data.batch(batch_size)
+            random_latent_vectors = None
+            for batch in data:
+                batch_, cond_ = batch
+                _, _, random_latent_vectors = self.encoder([batch_,cond_], training=False)
+        else:
+            random_latent_vectors = tf.random.normal(
+                shape=(nevts, self.latent_dim)
+            )
+    
         # random_latent_vectors =self.PCSampler(cond,num_steps=self.num_steps,snr=self.snr)
         #random_latent_vectors =self.ODESampler(cond,atol=1e-5)
         

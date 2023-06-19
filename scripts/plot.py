@@ -33,6 +33,7 @@ parser.add_argument('--checkpoint', type=str, default=None, help='Which checkpoi
 
 # adding flags for experimentation
 parser.add_argument('--noise_dims', type=int,default=None, help='Dimensionality of latent space')
+parser.add_argument('--sample_encoder', action="store_true",default=False, help='Sample z from enconder')
 
 flags = parser.parse_args()
 
@@ -51,15 +52,38 @@ if flags.sample:
         checkpoint_folder = flags.checkpoint
     else:
         checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
+    
     energies = []
-    for dataset in config['EVAL']:
-        energy_ = utils.EnergyLoader(os.path.join(flags.data_folder,dataset),
-                                     flags.nevts,
-                                     emax = config['EMAX'],emin = config['EMIN'],
-                                     logE=config['logE'])
-        energies.append(energy_)
+    if flags.sample_encoder:
+        hvd.init()
+        data = []
+        for dataset in config['EVAL']:
+            data_, energy_ = data_,energy_ = utils.DataLoader(
+                os.path.join(flags.data_folder,dataset),
+                config['SHAPE'],flags.nevts,
+                emax = config['EMAX'],emin = config['EMIN'],
+                logE=config['logE'],
+                rank=hvd.rank(),size=hvd.size(),
+            )
+            
+            data.append(data_)
+            energies.append(energy_)
+        data = np.reshape(data,config['SHAPE'])
+        energies = np.reshape(energies,(-1,1))
+        data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
+        data_size = data.shape[0]
+        tf_data = tf.data.Dataset.from_tensor_slices(data)
+        tf_energies = tf.data.Dataset.from_tensor_slices(energies) 
+        dataset = tf.data.Dataset.zip((tf_data, tf_energies))
+    else:
+        for dataset in config['EVAL']:
+            energy_ = utils.EnergyLoader(os.path.join(flags.data_folder,dataset),
+                                        flags.nevts,
+                                        emax = config['EMAX'],emin = config['EMIN'],
+                                        logE=config['logE'])
+            energies.append(energy_)
 
-    energies = np.reshape(energies,(-1,1))
+        energies = np.reshape(energies,(-1,1))
 
     if flags.model == 'wgan':
         num_noise=config['NOISE_DIM']
@@ -77,7 +101,10 @@ if flags.sample:
         model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
         start = time.time()        
         print("start sampling")
-        generated = model.generate(energies.shape[0],energies).numpy()
+        if flags.sample_encoder:
+            generated = model.generate(energies.shape[0], energies, True, dataset).numpy()
+        else:
+            generated = model.generate(energies.shape[0],energies).numpy()
         end = time.time()
         print(end - start)
 
