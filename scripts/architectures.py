@@ -126,24 +126,24 @@ def Decoder(
                 residual = x
             else:
                 if use_1D:
-                    residual = SpectralNormalization(layers.Conv1D(width, kernel_size=1))(x)
+                    residual = layers.Conv1D(width, kernel_size=1)(x)
                 else:
-                    residual = SpectralNormalization(layers.Conv3D(width, kernel_size=1))(x)
+                    residual = layers.Conv3D(width, kernel_size=1)(x)
 
             n = layers.Dense(width)(n)
             # x = tfa.layers.GroupNormalization(groups=4)(x)
             x = act(x)
             if use_1D:
-                x = SpectralNormalization(layers.Conv1D(width, kernel_size=kernel, padding="same"))(x)
+                x = layers.Conv1D(width, kernel_size=kernel, padding="same")(x)
             else:
-                x = SpectralNormalization(layers.Conv3D(width, kernel_size=kernel, padding="same"))(x)
+                x = layers.Conv3D(width, kernel_size=kernel, padding="same")(x)
             x = layers.Add()([x, n])
             # x = tfa.layers.GroupNormalization(groups=4)(x)
             x = act(x)
             if use_1D:
-                x = SpectralNormalization(layers.Conv1D(width, kernel_size=kernel, padding="same"))(x)
+                x = layers.Conv1D(width, kernel_size=kernel, padding="same")(x)
             else:
-                x = SpectralNormalization(layers.Conv3D(width, kernel_size=kernel, padding="same"))(x)
+                x = layers.Conv3D(width, kernel_size=kernel, padding="same")(x)
             x = layers.Add()([residual, x])
 
             if attention:
@@ -206,12 +206,12 @@ def Resnet(
 
     def resnet_dense(input_layer,hidden_size):
         layer,time = input_layer
-        residual = SpectralNormalization(layers.Dense(hidden_size))(layer) # might be overkill to add the spectral norm to the these layers
-        embed =  SpectralNormalization(layers.Dense(hidden_size))(time)
+        residual = layers.Dense(hidden_size)(layer) # might be overkill to add the spectral norm to the these layers
+        embed =  layers.Dense(hidden_size)(time)
         x = act(layer)
-        x = SpectralNormalization(layers.Dense(hidden_size))(x)
+        x = layers.Dense(hidden_size)(x)
         x = act(layers.Add()([x, embed]))
-        x = SpectralNormalization(layers.Dense(hidden_size))(x)
+        x = layers.Dense(hidden_size)(x)
         x = layers.Add()([x, residual])
         return x
 

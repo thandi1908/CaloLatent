@@ -177,7 +177,7 @@ class CaloLatent(keras.Model):
                 kernel=3,
                 block_depth = 2,
                 widths = [32,64,96],
-                attentions = [False,False, True],
+                attentions = [False, True, True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
             )
@@ -243,7 +243,7 @@ class CaloLatent(keras.Model):
                 kernel=3,
                 block_depth = 2,
                 widths = [32,64,96],
-                attentions = [False,False, True],
+                attentions = [False,True, True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
             )
