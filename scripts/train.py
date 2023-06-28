@@ -109,13 +109,13 @@ if __name__ == '__main__':
         lr_schedule = tf.keras.experimental.CosineDecay(
             initial_learning_rate=LR*hvd.size(), decay_steps=NUM_EPOCHS*int(data_size*flags.frac/BATCH_SIZE)
         )
-        opt_vae = tf.keras.optimizers.Adamax(learning_rate=lr_schedule)
+        opt_vae = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_vae = hvd.DistributedOptimizer(
             opt_vae,average_aggregated_gradients=True)        
-        opt_sgm = tf.keras.optimizers.Adamax(learning_rate=lr_schedule)
+        opt_sgm = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_sgm = hvd.DistributedOptimizer(
             opt_sgm,average_aggregated_gradients=True)
-        opt_layer = tf.keras.optimizers.Adamax(learning_rate=lr_schedule)
+        opt_layer = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_layer = hvd.DistributedOptimizer(
             opt_layer,average_aggregated_gradients=True)
         
@@ -142,7 +142,7 @@ if __name__ == '__main__':
         steps_per_epoch=int(data_size*flags.frac/BATCH_SIZE),
         validation_data=test_data.batch(BATCH_SIZE),
         validation_steps=int(data_size*(1-flags.frac)/BATCH_SIZE),
-        verbose=1 if hvd.rank()==0 else 0,
+        verbose=2 if hvd.rank()==0 else 2,
         callbacks=callbacks
     )
 
