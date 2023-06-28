@@ -10,7 +10,10 @@ import tensorflow as tf
 from WGAN import WGAN
 from CaloLatent import CaloLatent
 import time
+import horovod.tensorflow.keras as hvd
 
+
+hvd.init()
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
@@ -28,6 +31,8 @@ parser.add_argument('--config', default='config_dataset2.json', help='Training p
 parser.add_argument('--nevts', type=int,default=1000, help='Number of events to load')
 parser.add_argument('--model', default='vae', help='Model to train')
 parser.add_argument('--sample', action='store_true', default=False,help='Sample from learned model')
+parser.add_argument('--test', action='store_true', default=False,help='Test if inverse transform returns original data')
+
 
 flags = parser.parse_args()
 
@@ -62,12 +67,22 @@ if flags.sample:
         model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
         start = time.time()        
         print("start sampling")
-        generated = model.generate(energies.shape[0],energies).numpy()
+        voxels=[]
+        layers = []
+        nsplit = 20
+        split_energy = np.array_split(energies,nsplit)
+        for split in split_energy:
+            voxel,layer = model.generate(split.shape[0],split)
+            voxels.append(voxel)
+            layers.append(layer)
+
+        voxels = np.concatenate(voxels)
+        layers = np.concatenate(layers)
         end = time.time()
         print(end - start)
 
         
-    generated,energies = utils.ReverseNorm(generated,energies[:nevts],
+    generated,energies = utils.ReverseNorm(voxels,layers,energies[:nevts],
                                            logE=config['logE'],                          
                                            emax = config['EMAX'],emin = config['EMIN'])
     
@@ -96,14 +111,51 @@ else:
         #models = ['VPSDE','subVPSDE','VESDE','wgan','vae']
         models = [flags.model]
 
+        
     energies = []
     data_dict = {}
-    for model in models:
-        if np.size(energies) == 0:
-            data,energies = LoadSamples(model)
+
+    if flags.test:
+        data = []
+        layers = []
+        energies = []
+        
+        for dataset in config['EVAL']:
+            data_,layer_,energy_ = utils.DataLoader(
+                os.path.join(flags.data_folder,dataset),
+                config['SHAPE'],nevts,
+                emax = config['EMAX'],emin = config['EMIN'],
+                logE=config['logE'],
+            )
+        
+        data.append(data_)
+        energies.append(energy_)
+        layers.append(layer_)
+
+        data = np.reshape(data,config['SHAPE'])
+        layers = np.concatenate(layers)
+
+        data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
+        layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers.json".format(config['DATASET']))
+        energies = np.reshape(energies,(-1,1))    
+        data,energies = utils.ReverseNorm(data,layers,energies[:nevts],
+                                          logE=config['logE'],
+                                          emax = config['EMAX'],
+                                          emin = config['EMIN'])
+    
+        data[data<config['ECUT']] = 0 #min from samples
+        for model in models:
             data_dict[utils.name_translate[model]]=data
-        else:
-            data_dict[utils.name_translate[model]]=LoadSamples(model)[0]
+            
+    else:        
+        for model in models:
+            if np.size(energies) == 0:
+                data,energies = LoadSamples(model)
+                data_dict[utils.name_translate[model]]=data
+            else:
+                data_dict[utils.name_translate[model]]=LoadSamples(model)[0]
+
+                
     total_evts = energies.shape[0]
 
     
@@ -365,7 +417,7 @@ else:
                 if vmax==0:
                     vmax = np.nanmax(average[:,:,0])
                     vmin = np.nanmin(average[:,:,0])
-                    print(vmin,vmax)
+                    #print(vmin,vmax)
                 im = ax.pcolormesh(range(average.shape[0]), range(average.shape[1]), average[:,:,0], cmap=cmap)
 
                 yScalarFormatter = utils.ScalarFormatterClass(useMathText=True)

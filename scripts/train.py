@@ -4,7 +4,6 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.callbacks import ReduceLROnPlateau,EarlyStopping,ModelCheckpoint
 import horovod.tensorflow.keras as hvd
-import horovod.tensorflow as hvd_tf
 import argparse
 import h5py as h5
 import utils
@@ -34,9 +33,10 @@ if __name__ == '__main__':
 
     config = utils.LoadJson(flags.config)
     data = []
+    layers = []
     energies = []
     for dataset in config['FILES']:
-        data_,energy_ = utils.DataLoader(
+        data_,layer_,energy_ = utils.DataLoader(
             os.path.join(flags.data_folder,dataset),
             config['SHAPE'],flags.nevts,
             emax = config['EMAX'],emin = config['EMIN'],
@@ -46,20 +46,28 @@ if __name__ == '__main__':
         
         data.append(data_)
         energies.append(energy_)
-        
+        layers.append(layer_)
 
     data = np.reshape(data,config['SHAPE'])
-    #data = utils.CalcPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
+    layers = np.concatenate(layers)
+        
+    # data = utils.CalcPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
+    # layers = utils.CalcPreprocessing(layers,"preprocessing_{}_layers.json".format(config['DATASET']))
+    
     data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
+    layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers.json".format(config['DATASET']))
+
+    
     energies = np.reshape(energies,(-1,1))    
     data_size = data.shape[0]
 
     tf_data = tf.data.Dataset.from_tensor_slices(data)        
-    tf_energies = tf.data.Dataset.from_tensor_slices(energies)    
-    dataset = tf.data.Dataset.zip((tf_data, tf_energies))
+    tf_energies = tf.data.Dataset.from_tensor_slices(energies)
+    tf_layer = tf.data.Dataset.from_tensor_slices(layers)    
+    dataset = tf.data.Dataset.zip((tf_data, tf_layer, tf_energies))
     
     train_data, test_data = utils.split_data(dataset,data_size,flags.frac)
-    del dataset, data, tf_data,tf_energies
+    del dataset, data, tf_data,tf_energies, tf_layer
     gc.collect()
     
     BATCH_SIZE = config['BATCH']
@@ -96,13 +104,23 @@ if __name__ == '__main__':
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
                            config=config)
         
-        opt_sgm =  tf.optimizers.Adam(learning_rate=LR)
+        
+        
         lr_schedule = tf.keras.experimental.CosineDecay(
-            initial_learning_rate=LR, decay_steps=NUM_EPOCHS*int(data_size*flags.frac/BATCH_SIZE)
+            initial_learning_rate=LR*hvd.size(), decay_steps=NUM_EPOCHS*int(data_size*flags.frac/BATCH_SIZE)
         )
         opt_vae = tf.keras.optimizers.Adamax(learning_rate=lr_schedule)
+        opt_vae = hvd.DistributedOptimizer(
+            opt_vae,average_aggregated_gradients=True)        
+        opt_sgm = tf.keras.optimizers.Adamax(learning_rate=lr_schedule)
+        opt_sgm = hvd.DistributedOptimizer(
+            opt_sgm,average_aggregated_gradients=True)
+        opt_layer = tf.keras.optimizers.Adamax(learning_rate=lr_schedule)
+        opt_layer = hvd.DistributedOptimizer(
+            opt_layer,average_aggregated_gradients=True)
         
         model.compile(
+            layer_optimizer = opt_layer,
             vae_optimizer=opt_vae,
             sgm_optimizer=opt_sgm,        
         )
@@ -114,7 +132,7 @@ if __name__ == '__main__':
     if hvd.rank()==0:
         checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
         checkpoint = ModelCheckpoint('{}/checkpoint'.format(checkpoint_folder),
-                                     save_best_only=True,mode='auto',
+                                     save_best_only=False,mode='auto',
                                      period=1,save_weights_only=True)
         callbacks.append(checkpoint)
     

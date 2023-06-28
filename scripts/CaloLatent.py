@@ -43,8 +43,8 @@ class CaloLatent(keras.Model):
 
         self.activation = tf.keras.activations.swish
         
-        self.kl_steps=100*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
-        self.warm_up_steps = 100*624//hvd.size() #number of steps to train the VAE alone
+        self.kl_steps=500*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
+        self.warm_up_steps = 500*624//hvd.size() #number of steps to train the VAE alone
         self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank        
 
         if len(self.data_shape) == 2:
@@ -57,34 +57,55 @@ class CaloLatent(keras.Model):
         inputs_cond = Input((self.num_cond))
         inputs_time = Input((1))
 
+
+        
+        #Time embedding for the diffusion models
         self.projection = self.GaussianFourierProjection(scale = 16)
-        cond_embed =  layers.Dense(2*self.num_embed,activation=None)(inputs_cond)
-        cond_embed =  self.activation(layers.Dense(self.num_embed,activation=None)(inputs_cond))
+        latent_time = self.Embedding(inputs_time,self.projection)
+        layer_time = self.Embedding(inputs_time,self.projection)
+
+
+        #2 Diffusion models, one that learns the latent space, conditioned on the energy deposition per layer, and one that learns only the energy depositions per layer
+
+
+        #Energy per layer model
+        cond_layer = self.activation(layers.Dense(self.num_embed,activation=None)(inputs_cond))
+        cond_layer = self.activation(layers.Dense(self.num_embed,activation=None)(tf.concat([cond_layer,layer_time],-1)))
+        inputs_layer,outputs_layer = self.ScoreModel(self.num_layer,cond_layer)
+        self.layer_energy = keras.models.Model([inputs_layer,inputs_time,inputs_cond], outputs_layer, name="score")
+
+        
+        cond_embed = self.activation(layers.Dense(self.num_embed,activation=None)(tf.concat([inputs_cond,inputs_layer],-1)))
+
+    
+
+        #Encoder and decoder are conditioned on the initial particle energy and in the eneergy deposited per layer, reuse the conditional embedding from before
 
 
         #Encoder model
         inputs_encoder,z_mean, z_log_sig, z = self.Encoder(cond_embed)
-        self.encoder = keras.Model([inputs_encoder,inputs_cond], [z_mean, z_log_sig, z], name="encoder")
-        self.mixing_logit = tf.Variable(tf.zeros((self.latent_dim)),trainable=True) #Learn the mixture between normal and non-normal components
+        self.encoder = keras.Model([inputs_encoder,inputs_cond,inputs_layer], [z_mean, z_log_sig, z], name="encoder")
+
+
+        #Latent model
+        cond_latent = self.activation(layers.Dense(self.num_embed,activation=None)(tf.concat([cond_embed,latent_time],-1)))
+        inputs_latent,outputs_latent = self.ScoreModel(self.latent_dim,cond_latent)
+        self.latent_diffusion = keras.models.Model([inputs_latent,inputs_time,inputs_cond,inputs_layer], outputs_latent, name="score")
+
+
+
         
         #Decoder Model
         inputs_decoder,outputs_decoder=self.Decoder(cond_embed)
-        self.decoder = keras.models.Model([inputs_decoder,inputs_cond], outputs_decoder, name="generator")
+        self.decoder = keras.models.Model([inputs_decoder,inputs_cond,inputs_layer], outputs_decoder, name="generator")
 
-        time_embed = self.Embedding(inputs_time,self.projection)
-        time_embed = layers.Dense(2*self.num_embed)(time_embed)
-        time_embed = self.activation(layers.Dense(self.num_embed)(time_embed))
-        time_embed = tf.concat([time_embed,cond_embed],-1)        
-        
-        ## Diffusion Model
-        inputs_score,outputs_score = self.ScoreModel(time_embed)
-        outputs_score = outputs_score/tf.sqrt(self.marginal_prob(inputs_time)[1])
-        self.score = keras.models.Model([inputs_score,inputs_time,inputs_cond], outputs_score, name="score")
+        #Learn the mixture between normal and non-normal components
+        self.mixing_logit = tf.Variable(tf.zeros((self.latent_dim)),trainable=True) 
 
         # if self.verbose:
         #     print(self.encoder.summary())
         #     print(self.decoder.summary())
-        #     print(self.score.summary())
+        #     print(self.latent_diffusion.summary())
 
 
         self.reconstruction_loss_tracker = keras.metrics.Mean(
@@ -92,59 +113,17 @@ class CaloLatent(keras.Model):
         )
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
         self.score_loss_tracker = keras.metrics.Mean(name="score_loss")
+        self.layer_loss_tracker = keras.metrics.Mean(name="layer_loss")
 
 
     def read_config(self):
         self.num_embed = self.config['EMBED']
         self.projection_dim = self.config['NOISE_DIM'] #latent space dimensionality
         self.num_steps = self.config['NSTEPS']
+        self.num_layer = self.config['NLAYER']
         self.snr=self.config['SNR']
 
         
-    def ResidualBlock(self,input_layer,embed,hidden_size,kernel_size=3,padding="same"):
-
-        cond = keras.activations.swish(embed)
-        cond = layers.Dense(hidden_size,activation=None,use_bias=False)(embed)
-        
-        if len(self.data_shape) == 2:
-            residual = tfa.layers.SpectralNormalization(
-                layers.Conv1D(hidden_size, kernel_size=1))(input_layer)
-        else:            
-            residual = tfa.layers.SpectralNormalization(
-                layers.Conv3D(hidden_size, kernel_size=1))(input_layer)
-            
-
-        x = tfa.layers.GroupNormalization(epsilon=1e-5,groups=1)(input_layer)
-        # x = layers.BatchNormalization(center=False, scale=False)(input_layer)
-        x = keras.activations.swish(x)
-        
-        
-        
-        #x = input_layer
-        if len(self.data_shape) == 2:
-            x = tfa.layers.SpectralNormalization(
-                layers.Conv1D(hidden_size,kernel_size=3,
-                              activation=self.activation,padding=padding))(x)
-            x = tfa.layers.SpectralNormalization(
-                layers.Conv1D(hidden_size,kernel_size=3,padding=padding))(x)
-        else:
-            x = layers.ZeroPadding3D(1)(x)
-            x = tfa.layers.SpectralNormalization(
-                layers.Conv3D(hidden_size,kernel_size=kernel_size,
-                              activation=None,padding=padding))(x)
-            x = layers.Add()([x, cond])
-            # x = layers.BatchNormalization(center=False, scale=False)(x)
-            x = tfa.layers.GroupNormalization(epsilon=1e-5,groups=1)(x)
-            x = keras.activations.swish(x)
-            x = layers.ZeroPadding3D(1)(x)
-            x = tfa.layers.SpectralNormalization(
-                layers.Conv3D(hidden_size,kernel_size=kernel_size,padding=padding))(x)
-            
-        if use_residual:
-            x = layers.Add()([x, residual])
-
-        return x
-
     
     def Encoder(self,cond_embed):        
         if len(self.data_shape) == 2:
@@ -176,7 +155,7 @@ class CaloLatent(keras.Model):
                 kernel=3,
                 block_depth = 2,
                 widths = [32,64,96],
-                attentions = [False,False, True],
+                attentions = [False,False,True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
             )
@@ -185,12 +164,12 @@ class CaloLatent(keras.Model):
 
             # print("last",layer_encoded)
             
-            z_mean = layers.Conv3D(1,kernel_size=1,padding="same",
+            z_mean = layers.Conv3D(4,kernel_size=1,padding="same",
                                    kernel_initializer=initializers.Zeros(),
                                    bias_initializer=initializers.Zeros(),
                                    strides=1,activation=None,use_bias=True)(outputs)
         
-            z_log_sig = layers.Conv3D(1,kernel_size=1,padding="same",
+            z_log_sig = layers.Conv3D(4,kernel_size=1,padding="same",
                                       kernel_initializer=initializers.Zeros(),
                                       bias_initializer=initializers.Zeros(),
                                       strides=1,activation=None,use_bias=True)(outputs)
@@ -264,27 +243,22 @@ class CaloLatent(keras.Model):
 
 
     
-    def ScoreModel(self,time_embed):
-        inputs,outputs = Resnet(self.latent_dim,
+    def ScoreModel(self,ndim,time_embed,
+                   num_layer=3,mlp_dim=128):
+        inputs,outputs = Resnet(ndim,
                                 time_embed,
-                                num_layer = 5,
-                                mlp_dim=256,
+                                num_layer = num_layer,
+                                mlp_dim=mlp_dim,
                                 )
                                 
         return inputs,outputs
 
     def marginal_prob(self,t):
-    
-        # var = self.sigma2_0 * ((self.sigma2_1 / self.sigma2_0) ** t)        
-        # mean = tf.sqrt(1.0 + self.sigma2_0 * (1.0 - (self.sigma2_1 / self.sigma2_0) ** t) / (1.0 - self.sigma2_0))
-
         log_mean_coeff = -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
         log_mean_coeff = tf.reshape(log_mean_coeff,(-1,1))
 
         mean = tf.exp(log_mean_coeff)
         var = 1 - tf.exp(2. * log_mean_coeff)
-        
-
         
         mean = tf.reshape(mean,(-1,1))
         var = tf.reshape(var,(-1,1))
@@ -293,26 +267,7 @@ class CaloLatent(keras.Model):
     def prior_sde(self,dimensions):
         return tf.random.normal(dimensions)
 
-    def inv_var(self,var):
-        #Return inverse variance for importance sampling
-
-        c = tf.math.log(1 - var)
-        a = self.beta_1 - self.beta_0
-        t = (-self.beta_0 + tf.sqrt(tf.square(self.beta_0) - 2 * a * c)) /a 
-        return t
-                    
-        return tf.math.log(var/self.sigma2_0)/tf.math.log(self.sigma2_1 / self.sigma2_0)
-
-
     def sde(self, t):
-        #https://github.com/NVlabs/LSGM/blob/main/diffusion_continuous.py
-        # sigma2_geom = self.sigma2_0 * ((self.sigma2_1 / self.sigma2_0) ** t)
-        # log_term = tf.math.log(self.sigma2_1 / self.sigma2_0)
-        # diffusion2= sigma2_geom * log_term / (1.0 - sigma2_geom)
-        # diffusion2 = tf.reshape(diffusion2,(-1,1))
-        # drift = -0.5*diffusion2
-
-
         beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
         beta_t = tf.reshape(beta_t,(-1,1))
         drift = -0.5 * beta_t
@@ -341,27 +296,22 @@ class CaloLatent(keras.Model):
             self.reconstruction_loss_tracker,
             self.kl_loss_tracker,
             self.score_loss_tracker,
+            self.layer_loss_tracker
         ]
 
-    def compile(self,vae_optimizer, sgm_optimizer):
+    def compile(self,vae_optimizer, sgm_optimizer,layer_optimizer):
         super(CaloLatent, self).compile(experimental_run_tf_function=False,
+                                        weighted_metrics=[],
                                         #run_eagerly=True
         )
         self.vae_optimizer = vae_optimizer
         self.sgm_optimizer = sgm_optimizer
+        self.layer_optimizer = layer_optimizer
 
 
-    def cross_entropy_const(self,t):
+    def cross_entropy_const(self,t=1e-5):
         return 0.5 * (1.0 + tf.math.log(2.0 * np.pi * self.marginal_prob(t)[1]))
     
-    def CrossEntropy(self,logit,label):
-        epsilon = 1e-5
-        
-        y_pred = tf.clip_by_value(tf.reshape(logit,(tf.shape(logit)[0],-1)), epsilon, 1. - epsilon)
-        y_label = tf.reshape(label,(tf.shape(logit)[0],-1))
-        ce = -y_label*tf.math.log(y_pred) - (1-y_label)*tf.math.log(1-y_pred)
-        ce = tf.reshape(ce,tf.shape(logit))
-        return ce
     
     def reset_opt(self,opt):
         for var in opt.variables():
@@ -373,47 +323,36 @@ class CaloLatent(keras.Model):
         rec = tf.reduce_sum(rec,axis)
         return tf.reduce_mean(rec)
 
-    def get_diffusion_entropy(self,z,cond,batch,t=None,eps=1e-3,weighted=True):
-        if t is None:
-            random_t = tf.random.uniform((batch,1))*(1-eps) + eps
-        else:
-            random_t = t
+    def get_diffusion_loss(self,inputs,conditionals,batch,model,weighted=True,use_mixing=True,eps=1e-5):
+
+        random_t = tf.random.uniform((batch,1))*(1-eps) + eps
             
         mean,var = self.marginal_prob(random_t)
-        diffusion2 = self.sde(random_t)[1]
+        f,g2 = self.sde(random_t)
         
-        if weighted:
-            weight_t = diffusion2/(2*var)
+        noise = tf.random.normal((tf.shape(inputs)))            
+        perturbed_inputs = inputs*mean + tf.sqrt(var)*noise
+        pred_params_q = model([perturbed_inputs,random_t]+conditionals)
+
+        if use_mixing:
+            mixing_component = perturbed_inputs*tf.sqrt(var)
+            #Trainable mixing
+            coeff = tf.math.sigmoid(self.mixing_logit)
+            #coeff = 1
+            params = (1. - coeff) * mixing_component + coeff * pred_params_q
         else:
-            weight_t = 1.0/2
+            coeff = 1.0
+            params = pred_params_q
             
-        ones = tf.ones_like(random_t)
-        sigma2_1, sigma2_eps = self.marginal_prob(ones)[1], self.marginal_prob(eps * ones)[1]
-        log_sigma2_1, log_sigma2_eps = tf.math.log(sigma2_1), tf.math.log(sigma2_eps)
-        var = tf.exp(random_t * log_sigma2_1 + (1 - random_t) * log_sigma2_eps)            
-        random_t = self.inv_var(var)
-        mean = self.marginal_prob(random_t)[0]                        
-        weight_t = 0.5 * (log_sigma2_1 - log_sigma2_eps) / (1.0 - var)
+        cross_entropy_per_var = tf.square(params - noise)
+        if weighted:
+            cross_entropy_per_var *= g2/(2*var)
 
-        
-        noise = tf.random.normal((tf.shape(z)))            
-        perturbed_z = z*mean + tf.sqrt(var)*noise
-        mixing_component = perturbed_z*tf.sqrt(var)
-        pred_params_q = self.score([perturbed_z,random_t,cond])
-
-        #Trainable mixing
-        coeff = tf.math.sigmoid(self.mixing_logit)
-        #coeff = 1
-        params = (1 - coeff) * mixing_component + coeff * pred_params_q
-        l2_term_q = tf.square(params - noise)
-        cross_entropy_per_var = weight_t * l2_term_q
-
-        return  cross_entropy_per_var, coeff, random_t
+        return  cross_entropy_per_var, coeff
     
     def train_step(self, inputs):
-        eps=1e-5
-        data,cond = inputs
-        batch = tf.shape(data)[0]
+        voxel,layer,cond = inputs
+        batch = tf.shape(voxel)[0]
         
         if len(self.data_shape) == 2:
             axis=(1,2)
@@ -422,7 +361,7 @@ class CaloLatent(keras.Model):
 
         
         with tf.GradientTape() as tape:
-            z_mean, z_log_sig, z = self.encoder([data,cond])
+            z_mean, z_log_sig, z = self.encoder([voxel,cond,layer])
                         
             vae_neg_entropy = distributions.MultivariateNormalDiag(
                 loc=z_mean,allow_nan_stats=False,
@@ -433,13 +372,13 @@ class CaloLatent(keras.Model):
                 scale_diag=tf.ones_like(z_mean)).log_prob(z)
             
             #VAE reconstruction
-            rec,log_std= tf.split(self.decoder([z,cond]),num_or_size_splits=2, axis=-1)
-            reconstruction_loss = self.reconstruction_loss(data,rec,log_std,axis=axis)
+            rec,log_std= tf.split(self.decoder([z,cond,layer]),num_or_size_splits=2, axis=-1)
+            reconstruction_loss = self.reconstruction_loss(voxel,rec,log_std,axis=axis)
             
-            cross_entropy_per_var,coeff,random_t = self.get_diffusion_entropy(z,cond,batch,eps=eps)
+            cross_entropy_per_var,coeff = self.get_diffusion_loss(z,[cond,layer],batch,model=self.latent_diffusion,weighted=True)
             #add constant entropy term
 
-            #cross_entropy_per_var += self.cross_entropy_const(eps)
+            #cross_entropy_per_var += self.cross_entropy_const()
             cross_entropy = tf.reduce_sum(cross_entropy_per_var,-1)
             
 
@@ -449,7 +388,7 @@ class CaloLatent(keras.Model):
             kl_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
                               lambda: kl_loss_joint,lambda:kl_loss_disjoint)
             
-            kl_loss = kl_loss_joint
+
             kl_loss = tf.reduce_mean(kl_loss)
 
             
@@ -470,36 +409,57 @@ class CaloLatent(keras.Model):
         self.reconstruction_loss_tracker.update_state(reconstruction_loss)
         self.kl_loss_tracker.update_state(beta*kl_loss)
 
-        #Diffusion training
+        #Latent Diffusion training
 
         with tf.GradientTape() as tape:
-            all_neg_log_p,coeff,_ = self.get_diffusion_entropy(z,cond,batch,eps=eps,weighted=False)
-            score_loss = tf.reduce_sum(all_neg_log_p, axis=-1)
-            score_loss = tf.reduce_mean(score_loss)
+            score_latent_loss,coeff = self.get_diffusion_loss(z,[cond,layer],batch,model=self.latent_diffusion,weighted=False)
+            score_latent_loss = tf.reduce_sum(score_latent_loss, axis=-1)
+            score_latent_loss = tf.reduce_mean(score_latent_loss)
             #Only start score training after the warmup
-            score_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
-                                 lambda: score_loss,lambda:0*score_loss)
+            score_latent_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+                                 lambda: score_latent_loss,lambda:0*score_latent_loss)
             
-        #+[self.mixing_logit]
-        grads = tape.gradient(score_loss, self.score.trainable_weights+[self.mixing_logit])
+
+        grads = tape.gradient(score_latent_loss, self.latent_diffusion.trainable_weights+[self.mixing_logit])
         grads = [tf.clip_by_norm(grad, 1)
                  for grad in grads]
-        #+[self.mixing_logit]
-        self.sgm_optimizer.apply_gradients(zip(grads, self.score.trainable_weights+[self.mixing_logit]))
-        self.score_loss_tracker.update_state(score_loss)
+
+        self.sgm_optimizer.apply_gradients(zip(grads, self.latent_diffusion.trainable_weights+[self.mixing_logit]))
+        self.score_loss_tracker.update_state(score_latent_loss)
+        
+        
+
+
+        #Energy per Layer Diffusion
+
+
+        with tf.GradientTape() as tape:
+            score_layer_loss,_ = self.get_diffusion_loss(layer,[cond],batch,model = self.layer_energy,weighted=False,use_mixing=False)
+            score_layer_loss = tf.reduce_sum(score_layer_loss, axis=-1)
+            score_layer_loss = tf.reduce_mean(score_layer_loss)
+            #Only start score training after the warmup
+
+        grads = tape.gradient(score_layer_loss, self.layer_energy.trainable_weights)
+        grads = [tf.clip_by_norm(grad, 1)
+                 for grad in grads]
+
+        self.layer_optimizer.apply_gradients(zip(grads, self.layer_energy.trainable_weights))
+        self.layer_loss_tracker.update_state(score_layer_loss)
+
         
         return {
             "rec_loss": self.reconstruction_loss_tracker.result(),
             "kl_loss": self.kl_loss_tracker.result(),
-            "sgm_loss":cross_entropy, 
+            "latent_loss":self.score_loss_tracker.result(),
+            "layer_loss":self.layer_loss_tracker.result(), 
             "beta":beta,            
             "mixing":tf.reduce_max(coeff)
         }
 
     def test_step(self, inputs):
-        eps=1e-5
-        data,cond = inputs
-        batch = tf.shape(data)[0]
+
+        voxel,layer,cond = inputs
+        batch = tf.shape(voxel)[0]
         
         if len(self.data_shape) == 2:
             axis=(1,2)
@@ -507,65 +467,111 @@ class CaloLatent(keras.Model):
             axis=(1,2,3,4)
 
         
-
-        z_mean, z_log_sig, z = self.encoder([data,cond])
+            
+        z_mean, z_log_sig, z = self.encoder([voxel,cond,layer])
                         
         vae_neg_entropy = distributions.MultivariateNormalDiag(
             loc=z_mean,allow_nan_stats=False,
             scale_diag=tf.exp(z_log_sig)).log_prob(z)
-
+        
         vae_logp = distributions.MultivariateNormalDiag(
             loc=tf.zeros_like(z_mean),allow_nan_stats=False,
             scale_diag=tf.ones_like(z_mean)).log_prob(z)
         
         #VAE reconstruction
-        rec,log_std= tf.split(self.decoder([z,cond]),num_or_size_splits=2, axis=-1)
-        reconstruction_loss = self.reconstruction_loss(data,rec,log_std,axis=axis)
-            
-        cross_entropy_per_var,coeff,random_t = self.get_diffusion_entropy(z,cond,batch,eps=eps)
+        rec,log_std= tf.split(self.decoder([z,cond,layer]),num_or_size_splits=2, axis=-1)
+        reconstruction_loss = self.reconstruction_loss(voxel,rec,log_std,axis=axis)
+        
+        cross_entropy_per_var,coeff = self.get_diffusion_loss(z,[cond,layer],batch,model=self.latent_diffusion,weighted=False)
         #add constant entropy term
-
-        cross_entropy_per_var += self.cross_entropy_const(eps)
+        
+        #cross_entropy_per_var += self.cross_entropy_const()
         cross_entropy = tf.reduce_sum(cross_entropy_per_var,-1)
-            
-
+        
+        
         kl_loss_joint = cross_entropy + vae_neg_entropy 
         kl_loss_disjoint = vae_neg_entropy - vae_logp
-            
+        
         kl_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
                           lambda: kl_loss_joint,lambda:kl_loss_disjoint)
-
-            
+        
         kl_loss = tf.reduce_mean(kl_loss)
-
-            
+        
+        
         #Simple linear scaling
         beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
         total_loss = beta*kl_loss + reconstruction_loss
 
+        
+        self.reconstruction_loss_tracker.update_state(reconstruction_loss)
+        self.kl_loss_tracker.update_state(beta*kl_loss)
+
+        #Latent Diffusion training
+
+
+        score_latent_loss,coeff = self.get_diffusion_loss(z,[cond,layer],batch,model=self.latent_diffusion,weighted=False)
+        score_latent_loss = tf.reduce_sum(score_latent_loss, axis=-1)
+        score_latent_loss = tf.reduce_mean(score_latent_loss)
+        #Only start score training after the warmup
+        score_latent_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+                                    lambda: score_latent_loss,lambda:0*score_latent_loss)
             
 
+        self.score_loss_tracker.update_state(score_latent_loss)
+        
+        
+
+
+        #Energy per Layer Diffusion
+
+
+        
+        score_layer_loss,_ = self.get_diffusion_loss(layer,[cond],batch,model = self.layer_energy,weighted=False,use_mixing=False)
+        score_layer_loss = tf.reduce_sum(score_layer_loss, axis=-1)
+        score_layer_loss = tf.reduce_mean(score_layer_loss)
+        #Only start score training after the warmup
+
+        self.layer_loss_tracker.update_state(score_layer_loss)
+
+        total_loss = beta*kl_loss + reconstruction_loss
+        
         return {
-            "rec_loss": reconstruction_loss,
-            "kl_loss": beta*kl_loss,
-            "sgm_loss":cross_entropy,
+            "rec_loss": self.reconstruction_loss_tracker.result(),
+            "kl_loss": self.kl_loss_tracker.result(),
+            "latent_loss":score_latent_loss,
+            "layer_loss":score_layer_loss, 
+            "beta":beta,            
+            "mixing":tf.reduce_max(coeff),
             "loss":total_loss,
         }
 
     
     def generate(self,nevts,cond):
+
+        layer_energies = self.PCSampler([cond], batch_size = cond.shape[0],
+                                        ndim=self.num_layer,
+                                        model = self.layer_energy,
+                                        num_steps=self.num_steps,
+                                        snr=self.snr).numpy()
+        
+        
         random_latent_vectors = tf.random.normal(
             shape=(nevts, self.latent_dim)
         )
         
-        random_latent_vectors =self.PCSampler(cond,num_steps=self.num_steps,snr=self.snr)
-        #random_latent_vectors =self.ODESampler(cond,atol=1e-5)
+        random_latent_vectors =self.PCSampler([cond,layer_energies],
+                                              batch_size = cond.shape[0],
+                                              ndim=self.latent_dim,
+                                              model=self.latent_diffusion,
+                                              use_mixing=True,
+                                              num_steps=self.num_steps,
+                                              snr=self.snr)
         
-        mean,log_std= tf.split(self.decoder([random_latent_vectors,cond], training=False),num_or_size_splits=2, axis=-1)
+        mean,log_std= tf.split(self.decoder([random_latent_vectors,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
                             
         # print(tf.exp(std))
         # input()
-        return mean
+        return mean,layer_energies
 
 
     @tf.function
@@ -646,12 +652,12 @@ class CaloLatent(keras.Model):
 
     def PCSampler(self,
                   cond,
-                  # num_steps=900, 
-                  # snr=0.165,
-                  #num_steps=2000,
+                  batch_size,
+                  ndim,
+                  model,
                   num_steps=200, 
-                  #snr=0.23,
-                  snr=0.3,
+                  snr=0.1,
+                  use_mixing=False,
                   ncorrections=1,
                   eps=1e-5):
         """Generate samples from score-based models with Predictor-Corrector method.
@@ -666,12 +672,11 @@ class CaloLatent(keras.Model):
         Samples.
         """
         import time
-        batch_size = cond.shape[0]
         t = tf.ones((batch_size,1))
-        data_shape = [batch_size,self.latent_dim]
+        data_shape = [batch_size,ndim]
         
-        cond = tf.convert_to_tensor(cond, dtype=tf.float32)
-        cond = tf.reshape(cond,(-1,self.num_cond))
+        #cond = tf.convert_to_tensor(cond, dtype=tf.float32)
+        #cond = tf.reshape(cond,(-1,self.num_cond))
         init_x = self.prior_sde(data_shape)
         time_steps = np.linspace(1., eps, num_steps)
         step_size = time_steps[0] - time_steps[1]        
@@ -683,11 +688,14 @@ class CaloLatent(keras.Model):
             z = tf.random.normal(x.shape)
             mean,var = self.marginal_prob(batch_time_step)
             
-            score = self.score([x, batch_time_step,cond])
-            mixing_component = x*tf.sqrt(var)
-            coeff = tf.math.sigmoid(self.mixing_logit)
-            params = (1 - coeff) * mixing_component + coeff * score
-            score=-params/tf.sqrt(var)
+            score = model([x, batch_time_step]+cond)
+            if use_mixing:            
+                mixing_component = x*tf.sqrt(var)
+                coeff = tf.math.sigmoid(self.mixing_logit)
+                params = (1 - coeff) * mixing_component + coeff * score
+                score=-params/tf.sqrt(var)
+            else:
+                score = -score/tf.sqrt(var)
 
             for _ in range(ncorrections):
                 # Corrector step (Langevin MCMC)
