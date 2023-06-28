@@ -33,7 +33,7 @@ def Encoder(
                     residual = layers.Conv3D(width, kernel_size=1)(x)
 
             n = layers.Dense(width)(n)
-            # x = tfa.layers.GroupNormalization(groups=4)(x)
+            #x = tfa.layers.GroupNormalization(groups=4)(x)
             x = act(x)
             if use_1D:
                 x = layers.Conv1D(width, kernel_size=kernel, padding="same")(x)
@@ -56,7 +56,7 @@ def Encoder(
                         num_heads=1, key_dim=width, attention_axes=(1)
                     )(x, x)
                 else:
-                    x = tfa.layers.GroupNormalization(groups=4, center=False, scale=False)(x)
+                    # x = tfa.layers.GroupNormalization(groups=4, center=False, scale=False)(x)
                     x = layers.MultiHeadAttention(
                         num_heads=1, key_dim=width, attention_axes=(1, 2, 3)
                     )(x, x)
@@ -153,7 +153,7 @@ def Decoder(
                         num_heads=1, key_dim=width, attention_axes=(1)
                     )(x, x)
                 else:
-                    x = tfa.layers.GroupNormalization(groups=4, center=False, scale=False)(x)
+                    # x = tfa.layers.GroupNormalization(groups=4, center=False, scale=False)(x)
                     x = layers.MultiHeadAttention(
                         num_heads=1, key_dim=width, attention_axes=(1, 2, 3)
                     )(x, x)
@@ -200,8 +200,8 @@ def Resnet(
 ):
 
     
-    #act = layers.LeakyReLU(alpha=0.01)
-    act = tf.keras.activations.swish
+    act = layers.LeakyReLU(alpha=0.01)
+    #act = tf.keras.activations.swish
 
     def resnet_dense(input_layer,hidden_size):
         layer,time = input_layer

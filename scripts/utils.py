@@ -216,15 +216,27 @@ def DataLoader(file_name,shape,
         e = h5f['incident_energies'][rank:int(nevts):size].astype(np.float32)/1000.0 #in GeV
         shower = h5f['showers'][rank:int(nevts):size].astype(np.float32)/1000.0 # in GeV
         
-    # shower += np.random.uniform(0,1e-7,size=shower.shape)    
     shower = shower.reshape(shape)
+    layer = np.sum(shower,(2,3,4),keepdims=True)
+    shower = np.ma.divide(shower,layer)
         
+    def convert_energies(e,layer_energies):
+        converted = np.zeros(layer_energies.shape,dtype=np.float32)
+        converted[:,0] = np.ma.divide(np.sum(layer_energies,-1),np.squeeze(2*e)).filled(0)
+        for i in range(1,layer_energies.shape[1]):
+            converted[:,i] = np.ma.divide(layer_energies[:,i-1],np.sum(layer_energies[:,i-1:],-1)).filled(0)
+            
+        return converted
+
+    layer = convert_energies(e,np.squeeze(layer))
+
     if logE:        
-        return shower,np.log10(e/emin)/np.log10(emax/emin)
+        return shower,layer,np.log10(e/emin)/np.log10(emax/emin)
     else:
-        return shower,(e-emin)/(emax-emin)
+        return shower,layer,(e-emin)/(emax-emin)
+    
         
-def ReverseNorm(voxels,e,
+def ReverseNorm(voxels,layers,e,
                 emax,emin,logE=True,
                 datasetN=2):
     '''Revert the transformations applied to the training set'''
@@ -243,6 +255,24 @@ def ReverseNorm(voxels,e,
         return x
 
     voxels = _revert(voxels,'preprocessing_{}_voxel.json'.format(datasetN))
+    layers = _revert(layers,'preprocessing_{}_layers.json'.format(datasetN))
+
+    #Undo layer energy transformation
+    layer_norm= np.zeros(layers.shape,dtype=np.float32)    
+    for i in range(layers.shape[1]):
+        layer_norm[:,i] = np.squeeze(2*energy)*layers[:,i]
+        
+    layer_norm[:,0] = np.squeeze(2*energy)*layers[:,0]*layers[:,1]
+    for i in range(1,layers.shape[1]-1):
+        layer_norm[:,i] = layers[:,i+1]*(np.squeeze(2*energy)*layers[:,0] - np.sum(layer_norm[:,:i],-1))
+    layer_norm[:,-1] = np.squeeze(2*energy)*layers[:,0] - np.sum(layer_norm[:,:-1],-1)
+
+
+    voxels /= np.sum(voxels,(2,3,4),keepdims=True)
+    voxels*=layer_norm.reshape((-1,layer_norm.shape[1],1,1,1))
+
+
+    
     return voxels,energy
 
 
