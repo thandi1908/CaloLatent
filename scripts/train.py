@@ -29,9 +29,17 @@ if __name__ == '__main__':
     parser.add_argument('--nevts', type=float,default=-1, help='Number of events to load')
     parser.add_argument('--frac', type=float,default=0.8, help='Fraction of total events used for training')
     parser.add_argument('--load', action='store_true', default=False,help='Load pretrained weights to continue the training')
+    parser.add_argument('--noise_dims', type=int,default=None, help='Factor to multiply base latent dims by')
+    
     flags = parser.parse_args()
 
     config = utils.LoadJson(flags.config)
+
+    if flags.noise_dims:
+        config["NOISE_DIM"] = flags.noise_dims
+
+    print(f"Training with multiplirt: {config['NOISE_DIM']}")
+
     data = []
     layers = []
     energies = []
@@ -126,11 +134,11 @@ if __name__ == '__main__':
         )
         
     if flags.load:
-        checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["NOISE_DIM"])
         model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
 
     if hvd.rank()==0:
-        checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
         checkpoint = ModelCheckpoint('{}/checkpoint'.format(checkpoint_folder),
                                      save_best_only=False,mode='auto',
                                      period=1,save_weights_only=True)
@@ -148,8 +156,9 @@ if __name__ == '__main__':
 
 
     if hvd.rank()==0:
-        checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
         if not os.path.exists(checkpoint_folder):
             os.makedirs(checkpoint_folder)
+        
         os.system('cp CaloLatent.py {}'.format(checkpoint_folder)) # bkp of model def
         os.system('cp JSON/{} {}'.format(flags.config,checkpoint_folder)) # bkp of config file

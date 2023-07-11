@@ -32,16 +32,21 @@ parser.add_argument('--nevts', type=int,default=1000, help='Number of events to 
 parser.add_argument('--model', default='vae', help='Model to train')
 parser.add_argument('--sample', action='store_true', default=False,help='Sample from learned model')
 parser.add_argument('--test', action='store_true', default=False,help='Test if inverse transform returns original data')
+parser.add_argument('--noise_dims', type=int,default=None, help='Factor to multiply base latent dims by')
 
 
 flags = parser.parse_args()
 
 nevts = int(flags.nevts)
 config = utils.LoadJson(flags.config)
+
+if flags.noise_dims:
+    config["NOISE_DIM"] = flags.noise_dims
+
 run_classifier=False
 
 if flags.sample:
-    checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
+    checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
     energies = []
     for dataset in config['EVAL']:
         energy_ = utils.EnergyLoader(os.path.join(flags.data_folder,dataset),
