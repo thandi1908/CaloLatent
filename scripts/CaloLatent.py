@@ -131,7 +131,7 @@ class CaloLatent(keras.Model):
             use_1D = True
             inputs,outputs = Encoder(
                 self.data_shape,
-                comd_embed,
+                cond_embed,
                 input_embedding_dims = 16,
                 stride=2,
                 kernel=3,
@@ -164,12 +164,12 @@ class CaloLatent(keras.Model):
 
             # print("last",layer_encoded)
             
-            z_mean = layers.Conv3D(4,kernel_size=1,padding="same",
+            z_mean = layers.Conv3D(self.projection_dim,kernel_size=1,padding="same",
                                    kernel_initializer=initializers.Zeros(),
                                    bias_initializer=initializers.Zeros(),
                                    strides=1,activation=None,use_bias=True)(outputs)
         
-            z_log_sig = layers.Conv3D(4,kernel_size=1,padding="same",
+            z_log_sig = layers.Conv3D(self.projection_dim,kernel_size=1,padding="same",
                                       kernel_initializer=initializers.Zeros(),
                                       bias_initializer=initializers.Zeros(),
                                       strides=1,activation=None,use_bias=True)(outputs)
@@ -184,6 +184,8 @@ class CaloLatent(keras.Model):
         
             z = Sampling()([z_mean, z_log_sig])
             self.latent_dim = z.shape[-1]
+
+            print(f"Model latent dimensions: {self.latent_dim}")
 
         return  inputs, z_mean, z_log_sig, z
 
@@ -266,6 +268,14 @@ class CaloLatent(keras.Model):
 
     def prior_sde(self,dimensions):
         return tf.random.normal(dimensions)
+    
+    def inv_var(self,var):
+        #Return inverse variance for importance sampling
+
+        c = tf.math.log(1 - var)
+        a = self.beta_1 - self.beta_0
+        t = (-self.beta_0 + tf.sqrt(tf.square(self.beta_0) - 2 * a * c)) /a 
+        return t
 
     def sde(self, t):
         beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
@@ -325,9 +335,20 @@ class CaloLatent(keras.Model):
 
     def get_diffusion_loss(self,inputs,conditionals,batch,model,weighted=True,use_mixing=True,eps=1e-5):
 
-        random_t = tf.random.uniform((batch,1))*(1-eps) + eps
-            
-        mean,var = self.marginal_prob(random_t)
+        random_t = tf.random.uniform((batch,1))*(1-eps) + eps 
+
+        if weighted:
+            # using importance sampling for t
+            ones = tf.ones_like(random_t)
+            sigma2_1, sigma2_eps = self.marginal_prob(ones)[1], self.marginal_prob(eps * ones)[1]
+            log_sigma2_1, log_sigma2_eps = tf.math.log(sigma2_1), tf.math.log(sigma2_eps)
+            var = tf.exp(random_t * log_sigma2_1 + (1 - random_t) * log_sigma2_eps)            
+            random_t = self.inv_var(var)
+            mean = self.marginal_prob(random_t)[0]
+        else: 
+            # using uniform sampling for t 
+            mean,var = self.marginal_prob(random_t) 
+        
         f,g2 = self.sde(random_t)
         
         noise = tf.random.normal((tf.shape(inputs)))            
@@ -346,7 +367,8 @@ class CaloLatent(keras.Model):
             
         cross_entropy_per_var = tf.square(params - noise)
         if weighted:
-            cross_entropy_per_var *= g2/(2*var)
+            # cross_entropy_per_var *= g2/(2*var)
+            cross_entropy_per_var *= (0.5 * (log_sigma2_1 - log_sigma2_eps) / (1.0 - var))
 
         return  cross_entropy_per_var, coeff
     
@@ -482,7 +504,7 @@ class CaloLatent(keras.Model):
         rec,log_std= tf.split(self.decoder([z,cond,layer]),num_or_size_splits=2, axis=-1)
         reconstruction_loss = self.reconstruction_loss(voxel,rec,log_std,axis=axis)
         
-        cross_entropy_per_var,coeff = self.get_diffusion_loss(z,[cond,layer],batch,model=self.latent_diffusion,weighted=False)
+        cross_entropy_per_var,coeff = self.get_diffusion_loss(z,[cond,layer],batch,model=self.latent_diffusion,weighted=True)
         #add constant entropy term
         
         #cross_entropy_per_var += self.cross_entropy_const()
