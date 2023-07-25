@@ -11,6 +11,10 @@ from WGAN import WGAN
 from CaloLatent import CaloLatent
 import time
 import horovod.tensorflow.keras as hvd
+import matplotlib.pyplot as plt
+from tensorflow import keras
+from sklearn.metrics import roc_curve, auc
+import copy
 
 
 hvd.init()
@@ -44,16 +48,49 @@ if flags.noise_dims:
     config["NOISE_DIM"] = flags.noise_dims
 
 run_classifier=False
+ld_plot=True
 
 if flags.sample:
     checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
+    
     energies = []
-    for dataset in config['EVAL']:
-        energy_ = utils.EnergyLoader(os.path.join(flags.data_folder,dataset),
-                                     flags.nevts,
-                                     emax = config['EMAX'],emin = config['EMIN'],
-                                     logE=config['logE'])
-        energies.append(energy_)
+    if ld_plot:
+        layers = []
+        data = []
+        for dataset in config['EVAL']:
+        
+            data_,layer_,energy_ = utils.DataLoader(
+            os.path.join(flags.data_folder,dataset),
+            config['SHAPE'],flags.nevts,
+            emax = config['EMAX'],emin = config['EMIN'],
+            logE=config['logE'],
+            rank=hvd.rank(),size=hvd.size(),
+        )
+            
+            data.append(data_)
+            energies.append(energy_)
+            layers.append(layer_)
+
+        data = np.reshape(data,config['SHAPE'])
+        layers = np.concatenate(layers)
+        
+        data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
+        layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers.json".format(config['DATASET']))
+
+        
+        energies = np.reshape(energies,(-1,1))    
+        data_size = data.shape[0]
+        # tf_data = tf.data.Dataset.from_tensor_slices(data)        
+        # tf_energies = tf.data.Dataset.from_tensor_slices(energies)
+        # tf_layer = tf.data.Dataset.from_tensor_slices(layers)    
+        # dataset = tf.data.Dataset.zip((tf_data, tf_layer, tf_energies))
+    else:
+        for dataset in config['EVAL']:
+            energy_ = utils.EnergyLoader(os.path.join(flags.data_folder,dataset),
+                                        flags.nevts,
+                                        emax = config['EMAX'],emin = config['EMIN'],
+                                        logE=config['logE'])
+            energies.append(energy_)
 
     energies = np.reshape(energies,(-1,1))
 
@@ -74,29 +111,50 @@ if flags.sample:
         start = time.time()        
         print("start sampling")
         voxels=[]
-        layers = []
+        layers_ = []
+        m_latents = []
+        t_latents = []
         nsplit = 20
         split_energy = np.array_split(energies,nsplit)
-        for split in split_energy:
-            voxel,layer = model.generate(split.shape[0],split)
+        split_layer = np.array_split(layers, nsplit)
+        split_data = np.array_split(data, nsplit)
+        for split_e, split_l, split_d in zip(split_energy, split_layer, split_data):
+            voxel,layer, m_latent, t_latent  = model.generate(split_e.shape[0],split_e, sample_encoder=ld_plot, layer=split_l, data=split_d)
             voxels.append(voxel)
-            layers.append(layer)
+            layers_.append(layer)
+            m_latents.append(m_latent)
+            t_latents.append(t_latent)
 
         voxels = np.concatenate(voxels)
-        layers = np.concatenate(layers)
+        layers = np.concatenate(layers_)
         end = time.time()
+
+        m_latent = np.concatenate(m_latents)
+        t_latent = np.concatenate(t_latents)
+
         print(end - start)
 
-        
-    generated,energies = utils.ReverseNorm(voxels,layers,energies[:nevts],
+        #plot latent_dims
+        if ld_plot:
+            plt.figure()
+            _ = plt.hist(m_latent, bins=35, label=f"{flags.model} Latent", color="orangered", alpha=0.5)
+            _ = plt.hist(t_latent, bins=35, label="Ground Truth Latent", color="purple", alpha=0.5)
+            plt.legend()
+            plt.xlabel("Random Latent Dim")
+            plt.ylabel("Entries")
+            plt.savefig(f"latent_dims_{flags.model}.png", dpi=200)
+
+    energies_ = copy.deepcopy(energies)
+    generated,energies = utils.ReverseNorm(voxels,layers,energies_[:nevts],
                                            logE=config['logE'],                          
                                            emax = config['EMAX'],emin = config['EMIN'])
     
     generated[generated<config['ECUT']] = 0 #min from samples
-    
+
     with h5.File(os.path.join(flags.data_folder,'generated_{}_{}.h5'.format(config['CHECKPOINT_NAME'],flags.model)),"w") as h5f:
         dset = h5f.create_dataset("showers", data=1000*np.reshape(generated,(generated.shape[0],-1)))
         dset = h5f.create_dataset("incident_energies", data=1000*energies)
+
 else:
     def LoadSamples(model):
         generated = []
@@ -108,11 +166,12 @@ else:
             
         energies = np.reshape(energies,(-1,1))
         generated = np.reshape(generated,config['SHAPE'])
-        return generated,energies
+        return generated, energies
 
 
     if flags.model != 'all':
         models = [flags.model]
+        # model = ["vae", "vae_only"]
     else:
         #models = ['VPSDE','subVPSDE','VESDE','wgan','vae']
         models = [flags.model]
@@ -155,6 +214,7 @@ else:
             
     else:        
         for model in models:
+            print(f"model: {model}")
             if np.size(energies) == 0:
                 data,energies = LoadSamples(model)
                 data_dict[utils.name_translate[model]]=data
@@ -386,6 +446,29 @@ else:
         fig.savefig('{}/FCC_MaxEnergy_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
         return feed_dict
 
+    def Classifier(data_dict,gen_name='VAE'):
+        train = np.concatenate([data_dict['vae_only'],data_dict[gen_name]],0)
+        labels = np.concatenate([np.zeros((data_dict['vae_only'].shape[0],1)),
+                                 np.ones((data_dict[gen_name].shape[0],1))],0)
+        train=train.reshape((train.shape[0],-1))
+        model = keras.Sequential([
+            keras.layers.Dense(256, activation='relu'),
+            keras.layers.Dense(256, activation='relu'),
+            keras.layers.Dense(1,activation='sigmoid')
+        ])
+        opt = tf.optimizers.Adam(learning_rate=2e-4)
+        model.compile(optimizer=opt,
+                      loss="binary_crossentropy",
+                      metrics=['accuracy'])
+        
+        model.fit(train, labels,batch_size=100, epochs=3, verbose=2)
+        pred = model.predict(train)
+        fpr, tpr, _ = roc_curve(labels,pred, pos_label=1)    
+        print("{} AUC: {}".format(auc(fpr, tpr),gen_name))
+        true = np.concatenate(data_dict["Geant4"])
+        # pred_true = model.predict(true)
+        # print(f"Average prediction: {np.mean(pred_true)}")
+
     def Plot_Shower_2D(data_dict):
         #cmap = plt.get_cmap('PiYG')
         cmap = plt.get_cmap('viridis').copy()
@@ -456,6 +539,8 @@ else:
         plot_routines['Energy per phi']=AverageEY
         # plot_routines['2D average shower']=Plot_Shower_2D
         plot_routines['Max voxel']=HistMaxELayer
+        if run_classifier:
+            plot_routines['Class']=Classifier
 
         
     for plot in plot_routines:
