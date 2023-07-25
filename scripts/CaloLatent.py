@@ -53,14 +53,14 @@ class CaloLatent(keras.Model):
         self.sigma2_1 = 0.99
         self.beta_0 = 0.1
         self.beta_1 = 20.0
-        self.name = name
+        self.model_name = name
 
         self.activation = tf.keras.activations.swish
         
         self.kl_steps=650*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
-        self.warm_up_steps = 10e20*624//hvd.size() if self.name =="vae_only" else 650*624//hvd.size()  #number of steps to train the VAE alone
+        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 650*624//hvd.size()  #number of steps to train the VAE alone
         self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank        
-        self.beta_cycle = frange_cycle_linear(0.0, 1.0, self.warm_up_steps, 4, 0.5)
+        # self.beta_cycle = frange_cycle_linear(0.0, 1.0, self.warm_up_steps, 4, 0.5)
         
         if len(self.data_shape) == 2:
             self.shape = (-1,1,1)
@@ -606,12 +606,12 @@ class CaloLatent(keras.Model):
             
             _, _, RLV = self.encoder([data, cond, layer], training=False) 
         
-        if self.name == "vae_only":
+        if self.model_name == "vae_only":
             random_latent_vectors = tf.random.normal(
             shape=(nevts, self.latent_dim)
             )
             latent = random_latent_vectors[:,dim]
-        elif self.name == "vae":
+        elif self.model_name == "vae":
             random_latent_vectors =self.PCSampler([cond,layer_energies],
                                                 batch_size = cond.shape[0],
                                                 ndim=self.latent_dim,
