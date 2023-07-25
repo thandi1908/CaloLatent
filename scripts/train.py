@@ -38,7 +38,8 @@ if __name__ == '__main__':
     if flags.noise_dims:
         config["NOISE_DIM"] = flags.noise_dims
 
-    print(f"Training with multiplirt: {config['NOISE_DIM']}")
+    print(f"Training with multiplier: {config['NOISE_DIM']}")
+    print(f"Training {flags.model}")
 
     data = []
     layers = []
@@ -108,11 +109,9 @@ if __name__ == '__main__':
             g_optimizer=opt_gen,        
         )
 
-    elif flags.model == 'vae':
+    elif "vae" in flags.model:
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
-                           config=config)
-        
-        
+                           config=config, name=flags.model)
         
         lr_schedule = tf.keras.experimental.CosineDecay(
             initial_learning_rate=LR*hvd.size(), decay_steps=NUM_EPOCHS*int(data_size*flags.frac/BATCH_SIZE)

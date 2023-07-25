@@ -12,7 +12,20 @@ from architectures import Encoder, Decoder, Resnet
 
 def soft_clamp(layer,n=5.0):
     return n*tf.math.tanh(layer/n)
-    
+
+def frange_cycle_linear(start, stop, n_epoch, n_cycle=4, ratio=0.5):
+    L = np.ones(n_epoch)
+    period = n_epoch/n_cycle
+    step = (stop-start)/(period*ratio) # linear schedule
+
+    for c in range(n_cycle):
+
+        v , i = start , 0
+        while v <= stop and (int(i+c*period) < n_epoch):
+            L[int(i+c*period)] = v
+            v += step
+            i += 1
+    return tf.cast(L, tf.float32)
 
 class Sampling(layers.Layer):
     """Uses (z_mean, z_log_var) to sample z, the latent vector."""
@@ -40,13 +53,15 @@ class CaloLatent(keras.Model):
         self.sigma2_1 = 0.99
         self.beta_0 = 0.1
         self.beta_1 = 20.0
+        self.name = name
 
         self.activation = tf.keras.activations.swish
         
-        self.kl_steps=500*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
-        self.warm_up_steps = 500*624//hvd.size() #number of steps to train the VAE alone
+        self.kl_steps=650*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
+        self.warm_up_steps = 10e20*624//hvd.size() if self.name =="vae_only" else 650*624//hvd.size()  #number of steps to train the VAE alone
         self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank        
-
+        self.beta_cycle = frange_cycle_linear(0.0, 1.0, self.warm_up_steps, 4, 0.5)
+        
         if len(self.data_shape) == 2:
             self.shape = (-1,1,1)
         else:
@@ -153,9 +168,12 @@ class CaloLatent(keras.Model):
                 input_embedding_dims = 32,
                 stride=2,
                 kernel=3,
-                block_depth = 2,
+                downsample_block_depth = 2,
+                # residual_block_depth = 4,
+                residual_block_depth= 2,
                 widths = [32,64,96],
-                attentions = [False,False,True],
+                # attentions = [False,False,False,False,True],
+                attentions= [False,False,True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
             )
@@ -220,9 +238,11 @@ class CaloLatent(keras.Model):
                 cond_embed,
                 stride=2,
                 kernel=3,
-                block_depth = 2,
-                widths = [32,64,96],
-                attentions = [False,False, True],
+                # residual_block_depth = 4,
+                residual_block_depth= 2,
+                widths = [32,64,96,],
+                # attentions = [False, False, False, False, True],
+                attentions= [False, False, True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
             )
@@ -415,7 +435,9 @@ class CaloLatent(keras.Model):
 
             
             #Simple linear scaling
-            beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
+            # beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
+            # beta = self.beta_cycle[self.vae_optimizer.iterations]
+            beta = 1
             total_loss = beta*kl_loss + reconstruction_loss
 
 
@@ -521,7 +543,9 @@ class CaloLatent(keras.Model):
         
         
         #Simple linear scaling
-        beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
+        # beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
+        # beta = self.beta_cycle[self.vae_optimizer.iterations]
+        beta = 1
         total_loss = beta*kl_loss + reconstruction_loss
 
         
@@ -568,7 +592,9 @@ class CaloLatent(keras.Model):
         }
 
     
-    def generate(self,nevts,cond):
+    def generate(self,nevts,cond, sample_encoder=False, layer=None, data=None):
+
+        dim = np.random.randint(0, self.latent_dim, 1)[0]
 
         layer_energies = self.PCSampler([cond], batch_size = cond.shape[0],
                                         ndim=self.num_layer,
@@ -576,25 +602,34 @@ class CaloLatent(keras.Model):
                                         num_steps=self.num_steps,
                                         snr=self.snr).numpy()
         
+        if sample_encoder:
+            
+            _, _, RLV = self.encoder([data, cond, layer], training=False) 
         
-        random_latent_vectors = tf.random.normal(
+        if self.name == "vae_only":
+            random_latent_vectors = tf.random.normal(
             shape=(nevts, self.latent_dim)
-        )
-        
-        random_latent_vectors =self.PCSampler([cond,layer_energies],
-                                              batch_size = cond.shape[0],
-                                              ndim=self.latent_dim,
-                                              model=self.latent_diffusion,
-                                              use_mixing=True,
-                                              num_steps=self.num_steps,
-                                              snr=self.snr)
-        
+            )
+            latent = random_latent_vectors[:,dim]
+        elif self.name == "vae":
+            random_latent_vectors =self.PCSampler([cond,layer_energies],
+                                                batch_size = cond.shape[0],
+                                                ndim=self.latent_dim,
+                                                model=self.latent_diffusion,
+                                                use_mixing=True,
+                                                num_steps=self.num_steps,
+                                                snr=self.snr)
+            
+            latent = random_latent_vectors[:,dim]
+
         mean,log_std= tf.split(self.decoder([random_latent_vectors,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
                             
         # print(tf.exp(std))
         # input()
-        return mean,layer_energies
-
+        if sample_encoder:
+            return mean,layer_energies, latent, RLV[:,dim]
+        else:
+           return mean,layer_energies, latent 
 
     @tf.function
     def _solve_ode(self, ode_fn, state, atol=1e-4,**kwargs):
