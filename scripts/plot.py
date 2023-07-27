@@ -47,11 +47,12 @@ config = utils.LoadJson(flags.config)
 if flags.noise_dims:
     config["NOISE_DIM"] = flags.noise_dims
 
-run_classifier=False
+run_classifier=True
 ld_plot=True
 
 if flags.sample:
     checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
+    print(checkpoint_folder)
     
     energies = []
     if ld_plot:
@@ -103,10 +104,10 @@ if flags.sample:
         end = time.time()
         print(end - start)
         
-    elif flags.model == 'vae':
+    elif "vae" in flags.model:
         hvd.init()
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
-                           config=config)
+                           config=config, name=flags.model)
         model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
         start = time.time()        
         print("start sampling")
@@ -144,8 +145,7 @@ if flags.sample:
             plt.ylabel("Entries")
             plt.savefig(f"latent_dims_{flags.model}.png", dpi=200)
 
-    energies_ = copy.deepcopy(energies)
-    generated,energies = utils.ReverseNorm(voxels,layers,energies_[:nevts],
+    generated,energies = utils.ReverseNorm(voxels,layers,energies[:nevts],
                                            logE=config['logE'],                          
                                            emax = config['EMAX'],emin = config['EMIN'])
     
@@ -170,8 +170,8 @@ else:
 
 
     if flags.model != 'all':
-        models = [flags.model]
-        # model = ["vae", "vae_only"]
+        # models = [flags.model]
+        models = ["vae", "vae_only"]
     else:
         #models = ['VPSDE','subVPSDE','VESDE','wgan','vae']
         models = [flags.model]
@@ -447,8 +447,8 @@ else:
         return feed_dict
 
     def Classifier(data_dict,gen_name='VAE'):
-        train = np.concatenate([data_dict['vae_only'],data_dict[gen_name]],0)
-        labels = np.concatenate([np.zeros((data_dict['vae_only'].shape[0],1)),
+        train = np.concatenate([data_dict['VAE+Diffusion'],data_dict[gen_name]],0)
+        labels = np.concatenate([np.zeros((data_dict['VAE+Diffusion'].shape[0],1)),
                                  np.ones((data_dict[gen_name].shape[0],1))],0)
         train=train.reshape((train.shape[0],-1))
         model = keras.Sequential([
@@ -465,9 +465,10 @@ else:
         pred = model.predict(train)
         fpr, tpr, _ = roc_curve(labels,pred, pos_label=1)    
         print("{} AUC: {}".format(auc(fpr, tpr),gen_name))
-        true = np.concatenate(data_dict["Geant4"])
-        # pred_true = model.predict(true)
-        # print(f"Average prediction: {np.mean(pred_true)}")
+        true = data_dict["Geant4"]
+        true = true.reshape((true.shape[0],-1))
+        pred_true = model.predict(true)
+        print(f"Average prediction: {np.mean(pred_true, axis=0)}")
 
     def Plot_Shower_2D(data_dict):
         #cmap = plt.get_cmap('PiYG')
