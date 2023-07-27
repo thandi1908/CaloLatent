@@ -20,14 +20,14 @@ line_style = {
     'Geant4':'dotted',
     'WGAN-GP':'-',
     'VAE+Diffusion':'-',
-    'vae_only': '-'
+    'VAE': '-'
 }
 
 colors = {
     'Geant4':'black',
     'WGAN-GP':'#e7298a',
     'VAE+Diffusion':'#7570b3',
-    'vae_only': '#AEB370'
+    'VAE': '#AEB370'
 }
 
 name_translate={
