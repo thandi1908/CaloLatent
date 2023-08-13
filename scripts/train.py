@@ -1,5 +1,5 @@
 import numpy as np
-import os
+import os, sys
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.callbacks import ReduceLROnPlateau,EarlyStopping,ModelCheckpoint
@@ -10,6 +10,7 @@ import utils
 from CaloLatent import CaloLatent
 import tensorflow_addons as tfa
 import gc
+import socket
 
 if __name__ == '__main__':
     hvd.init()
@@ -17,19 +18,25 @@ if __name__ == '__main__':
     for gpu in gpus:
         tf.config.experimental.set_memory_growth(gpu, True)
     if gpus:
+        print(f"Local_rank: {hvd.local_rank()}")
         tf.config.experimental.set_visible_devices(gpus[hvd.local_rank()], 'GPU')
 
-        
+    # check use of GPU training
+    if hvd.rank()==0:
+        print("size=",hvd.size())
+        print("local_rank=",hvd.local_rank()," node=",socket.gethostname()," rank=",hvd.rank(),"GPU=",hvd.tf.config.list_physical_devices('GPU'))   
+
     parser = argparse.ArgumentParser()
     
     #parser.add_argument('--data_folder', default='/pscratch/sd/v/vmikuni/FCC', help='Folder containing data and MC files')
     parser.add_argument('--data_folder', default='/global/cfs/cdirs/m3929/SCRATCH/FCC/', help='Folder containing data and MC files')
     parser.add_argument('--model', default='vae', help='Model to train.')
-    parser.add_argument('--config', default='config_dataset2.json', help='Config file with training parameters')
+    parser.add_argument('--config', default='config_dataset2_short.json', help='Config file with training parameters')
     parser.add_argument('--nevts', type=float,default=-1, help='Number of events to load')
     parser.add_argument('--frac', type=float,default=0.8, help='Fraction of total events used for training')
     parser.add_argument('--load', action='store_true', default=False,help='Load pretrained weights to continue the training')
     parser.add_argument('--noise_dims', type=int,default=None, help='Factor to multiply base latent dims by')
+    parser.add_argument('--coordinates', type=str,default="", help='Which coordinate system is the data in')
     
     flags = parser.parse_args()
 
@@ -40,6 +47,15 @@ if __name__ == '__main__':
 
     print(f"Training with multiplier: {config['NOISE_DIM']}")
     print(f"Training {flags.model}")
+    print(f"Using: {hvd.size()} GPUs")
+
+    if hvd.rank()==0:
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
+        if not os.path.exists(checkpoint_folder):
+            os.makedirs(checkpoint_folder)
+        
+        os.system('cp CaloLatent.py {}'.format(checkpoint_folder)) # bkp of model def
+        os.system('cp JSON/{} {}'.format(flags.config,checkpoint_folder)) # bkp of config file
 
     data = []
     layers = []
@@ -57,14 +73,15 @@ if __name__ == '__main__':
         energies.append(energy_)
         layers.append(layer_)
 
+    # print(f"Data Shape: {data.shape}")
     data = np.reshape(data,config['SHAPE'])
     layers = np.concatenate(layers)
         
-    # data = utils.CalcPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
-    # layers = utils.CalcPreprocessing(layers,"preprocessing_{}_layers.json".format(config['DATASET']))
-    
-    data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
-    layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers.json".format(config['DATASET']))
+    # data = utils.CalcPreprocessing(data,"preprocessing_{}_voxel_cartesian.json".format(config['DATASET']))
+    # layers = utils.CalcPreprocessing(layers,"preprocessing_{}_layers_cartesian.json".format(config['DATASET']))
+    # sys.exit()
+    data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel{}.json".format(config['DATASET'], flags.coordinates))
+    layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers{}.json".format(config['DATASET'], flags.coordinates))
 
     
     energies = np.reshape(energies,(-1,1))    
@@ -149,15 +166,6 @@ if __name__ == '__main__':
         steps_per_epoch=int(data_size*flags.frac/BATCH_SIZE),
         validation_data=test_data.batch(BATCH_SIZE),
         validation_steps=int(data_size*(1-flags.frac)/BATCH_SIZE),
-        verbose=2 if hvd.rank()==0 else 2,
+        verbose=2 if hvd.rank()==0 else 0,
         callbacks=callbacks
     )
-
-
-    if hvd.rank()==0:
-        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
-        if not os.path.exists(checkpoint_folder):
-            os.makedirs(checkpoint_folder)
-        
-        os.system('cp CaloLatent.py {}'.format(checkpoint_folder)) # bkp of model def
-        os.system('cp JSON/{} {}'.format(flags.config,checkpoint_folder)) # bkp of config file

@@ -8,6 +8,8 @@ import tensorflow_addons as tfa
 import tensorflow_probability as tfp
 from tensorflow_probability import distributions
 from architectures import Encoder, Decoder, Resnet
+import os
+import math as m
 
 
 def soft_clamp(layer,n=5.0):
@@ -33,7 +35,7 @@ class Sampling(layers.Layer):
     def call(self, inputs):
         z_mean, z_log_sig = inputs
         batch = tf.shape(z_mean)[0]
-        
+
         z = distributions.MultivariateNormalDiag(
             loc = z_mean,scale_diag=tf.exp(z_log_sig)).sample()
         
@@ -57,8 +59,8 @@ class CaloLatent(keras.Model):
 
         self.activation = tf.keras.activations.swish
         
-        self.kl_steps=650*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
-        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 650*624//hvd.size()  #number of steps to train the VAE alone
+        self.kl_steps=1000*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
+        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 4*624//hvd.size()  #number of steps to train the VAE alone
         self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank        
         # self.beta_cycle = frange_cycle_linear(0.0, 1.0, self.warm_up_steps, 4, 0.5)
         
@@ -168,12 +170,9 @@ class CaloLatent(keras.Model):
                 input_embedding_dims = 32,
                 stride=2,
                 kernel=3,
-                downsample_block_depth = 2,
-                # residual_block_depth = 4,
-                residual_block_depth= 2,
+                block_depth = 2,
                 widths = [32,64,96],
-                # attentions = [False,False,False,False,True],
-                attentions= [False,False,True],
+                attentions= [False, False, True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
             )
@@ -238,10 +237,8 @@ class CaloLatent(keras.Model):
                 cond_embed,
                 stride=2,
                 kernel=3,
-                # residual_block_depth = 4,
-                residual_block_depth= 2,
-                widths = [32,64,96,],
-                # attentions = [False, False, False, False, True],
+                block_depth= 2,
+                widths = [32,64,96],
                 attentions= [False, False, True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
@@ -255,9 +252,10 @@ class CaloLatent(keras.Model):
                                       kernel_initializer=initializers.Zeros(),
                                       bias_initializer=initializers.Zeros(),
                                       strides=1,activation=None,use_bias=True)(outputs)
-        #outputs_mean = layers.LeakyReLU(0.01)(outputs_mean)
-        #outputs_sigma = soft_clamp(outputs_sigma)
+        # outputs_mean = layers.LeakyReLU(0.01)(outputs_mean)
+        # outputs_sigma = soft_clamp(outputs_sigma)
         #outputs_mean = soft_clamp(outputs_mean,1)
+        # print(f"Output sigma: {outputs_sigma.numpy()}")
         outputs=tf.concat([outputs_mean,outputs_sigma],-1)
         
         return  inputs,outputs
@@ -332,7 +330,7 @@ class CaloLatent(keras.Model):
     def compile(self,vae_optimizer, sgm_optimizer,layer_optimizer):
         super(CaloLatent, self).compile(experimental_run_tf_function=False,
                                         weighted_metrics=[],
-                                        #run_eagerly=True
+                                        # run_eagerly=True
         )
         self.vae_optimizer = vae_optimizer
         self.sgm_optimizer = sgm_optimizer
@@ -348,11 +346,13 @@ class CaloLatent(keras.Model):
             var.assign(tf.zeros_like(var))
         return tf.constant(10)
 
-    def reconstruction_loss(self,data,mean,log_std,axis):
-        rec = tf.square(data-mean)                
+    def reconstruction_loss(self,data,mean,log_std,axis, lamda=2.5):
+        rec = tf.square(data-mean)
+        # rec_x = tf.reduce_mean(tf.reduce_sum(rec, axis =(1,3,4)))
+        # rec_y = tf.reduce_mean(tf.reduce_sum(rec, axis =(1,2,4)))
         rec = tf.reduce_sum(rec,axis)
-        return tf.reduce_mean(rec)
-
+        return tf.reduce_mean(rec) #+ lamda*(rec_x + rec_y)
+        
     def get_diffusion_loss(self,inputs,conditionals,batch,model,weighted=True,use_mixing=True,eps=1e-5):
 
         random_t = tf.random.uniform((batch,1))*(1-eps) + eps 
@@ -391,6 +391,10 @@ class CaloLatent(keras.Model):
             cross_entropy_per_var *= (0.5 * (log_sigma2_1 - log_sigma2_eps) / (1.0 - var))
 
         return  cross_entropy_per_var, coeff
+    def true_fn(self):
+        return True
+    def false_fn(self):
+        return False
     
     def train_step(self, inputs):
         voxel,layer,cond = inputs
@@ -403,7 +407,11 @@ class CaloLatent(keras.Model):
 
         
         with tf.GradientTape() as tape:
-            z_mean, z_log_sig, z = self.encoder([voxel,cond,layer])
+            # train = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+                            # lambda:self.false_fn(), lambda:self.true_fn())
+            # print(train)
+            train = True
+            z_mean, z_log_sig, z = self.encoder([voxel,cond,layer], training=train)
                         
             vae_neg_entropy = distributions.MultivariateNormalDiag(
                 loc=z_mean,allow_nan_stats=False,
@@ -424,7 +432,7 @@ class CaloLatent(keras.Model):
             cross_entropy = tf.reduce_sum(cross_entropy_per_var,-1)
             
 
-            kl_loss_joint = cross_entropy + vae_neg_entropy 
+            kl_loss_joint = cross_entropy + vae_neg_entropy
             kl_loss_disjoint = vae_neg_entropy - vae_logp
             
             kl_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
@@ -432,6 +440,8 @@ class CaloLatent(keras.Model):
             
 
             kl_loss = tf.reduce_mean(kl_loss)
+            # print(f"KL Loss: {kl_loss.numpy()}")
+            # print(f"P1: {tf.reduce_mean(vae_neg_entropy).numpy()}, P2: {tf.reduce_mean(vae_logp).numpy()}")
 
             
             #Simple linear scaling
@@ -445,14 +455,19 @@ class CaloLatent(keras.Model):
         tf.cond(self.warm_up_steps == self.sgm_optimizer.iterations,
                 lambda: self.reset_opt(self.vae_optimizer), lambda: tf.constant(10))
             
-                
+        # tf.cond(self.warm_up_steps == self.sgm_optimizer.iterations, lambda:freeze_VAE(self.encoder, self.decoder), lambda:tf.constant(10))    
+        
         grads = tape.gradient(total_loss, vae_weights)
         grads = [tf.clip_by_norm(grad, 1)
                  for grad in grads]
+        
         self.vae_optimizer.apply_gradients(zip(grads, vae_weights))
         self.reconstruction_loss_tracker.update_state(reconstruction_loss)
         self.kl_loss_tracker.update_state(beta*kl_loss)
 
+        # save VAE_only part of the training
+        # tf.cond(self.warm_up_steps == self.sgm_optimizer.iterations, lambda:self.checkpoint(), lambda:tf.constant(10))
+        
         #Latent Diffusion training
 
         with tf.GradientTape() as tape:
@@ -594,7 +609,7 @@ class CaloLatent(keras.Model):
     
     def generate(self,nevts,cond, sample_encoder=False, layer=None, data=None):
 
-        dim = np.random.randint(0, self.latent_dim, 1)[0]
+        dim = 3
 
         layer_energies = self.PCSampler([cond], batch_size = cond.shape[0],
                                         ndim=self.num_layer,
@@ -622,7 +637,7 @@ class CaloLatent(keras.Model):
             
             latent = random_latent_vectors[:,dim]
 
-        mean,log_std= tf.split(self.decoder([random_latent_vectors,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
+        mean,log_std= tf.split(self.decoder([RLV,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
                             
         # print(tf.exp(std))
         # input()

@@ -37,6 +37,7 @@ parser.add_argument('--model', default='vae', help='Model to train')
 parser.add_argument('--sample', action='store_true', default=False,help='Sample from learned model')
 parser.add_argument('--test', action='store_true', default=False,help='Test if inverse transform returns original data')
 parser.add_argument('--noise_dims', type=int,default=None, help='Factor to multiply base latent dims by')
+parser.add_argument('--coordinates', type=str,default="", help='Which coordinate system is the data in')
 
 
 flags = parser.parse_args()
@@ -47,7 +48,7 @@ config = utils.LoadJson(flags.config)
 if flags.noise_dims:
     config["NOISE_DIM"] = flags.noise_dims
 
-run_classifier=True
+run_classifier=False
 ld_plot=True
 
 if flags.sample:
@@ -75,8 +76,8 @@ if flags.sample:
         data = np.reshape(data,config['SHAPE'])
         layers = np.concatenate(layers)
         
-        data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
-        layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers.json".format(config['DATASET']))
+        data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel{}.json".format(config['DATASET'], flags.coordinates))
+        layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers{}.json".format(config['DATASET'], flags.coordinates))
 
         
         energies = np.reshape(energies,(-1,1))    
@@ -137,17 +138,21 @@ if flags.sample:
 
         #plot latent_dims
         if ld_plot:
+            dict_ = {
+                "vae": "VAE+Diffusion",
+                "vae_only": "VAE"
+            }
             plt.figure()
-            _ = plt.hist(m_latent, bins=35, label=f"{flags.model} Latent", color="orangered", alpha=0.5)
+            _ = plt.hist(m_latent, bins=35, label=f"{dict_[flags.model]} Latent", color="orangered", alpha=0.5)
             _ = plt.hist(t_latent, bins=35, label="Ground Truth Latent", color="purple", alpha=0.5)
             plt.legend()
             plt.xlabel("Random Latent Dim")
             plt.ylabel("Entries")
-            plt.savefig(f"latent_dims_{flags.model}.png", dpi=200)
+            plt.savefig(f"latent_dims_{config['CHECKPOINT_NAME']}_{flags.model}.png", dpi=200)
 
     generated,energies = utils.ReverseNorm(voxels,layers,energies[:nevts],
                                            logE=config['logE'],                          
-                                           emax = config['EMAX'],emin = config['EMIN'])
+                                           emax = config['EMAX'],emin = config['EMIN'], coordinates=flags.coordinates)
     
     generated[generated<config['ECUT']] = 0 #min from samples
 
@@ -160,7 +165,13 @@ else:
         generated = []
         energies = []
 
-        with h5.File(os.path.join(flags.data_folder,'generated_{}_{}.h5'.format(config['CHECKPOINT_NAME'],model)),"r") as h5f:
+        if model == "vae_only":
+            # checkpoint_name = config['CHECKPOINT_NAME'].split("_")[0]
+            checkpoint_name = config['CHECKPOINT_NAME']
+        else:
+            checkpoint_name = config['CHECKPOINT_NAME']
+        
+        with h5.File(os.path.join(flags.data_folder,'generated_{}_{}.h5'.format(checkpoint_name,model)),"r") as h5f:
             generated.append(h5f['showers'][:]/1000.)
             energies.append(h5f['incident_energies'][:]/1000.)
             
@@ -170,8 +181,8 @@ else:
 
 
     if flags.model != 'all':
-        # models = [flags.model]
-        models = ["vae", "vae_only"]
+        models = [flags.model]
+        # models = ["vae", "vae_only"]
     else:
         #models = ['VPSDE','subVPSDE','VESDE','wgan','vae']
         models = [flags.model]
@@ -200,13 +211,15 @@ else:
         data = np.reshape(data,config['SHAPE'])
         layers = np.concatenate(layers)
 
-        data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel.json".format(config['DATASET']))
-        layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers.json".format(config['DATASET']))
+        data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel{}.json".format(config['DATASET'], flags.coordinates))
+        layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers{}.json".format(config['DATASET'], flags.coordinates))
         energies = np.reshape(energies,(-1,1))    
         data,energies = utils.ReverseNorm(data,layers,energies[:nevts],
                                           logE=config['logE'],
                                           emax = config['EMAX'],
-                                          emin = config['EMIN'])
+                                          emin = config['EMIN'],
+                                          coordinates=flags.coordinates
+                                          )
     
         data[data<config['ECUT']] = 0 #min from samples
         for model in models:
@@ -468,6 +481,12 @@ else:
         true = data_dict["Geant4"]
         true = true.reshape((true.shape[0],-1))
         pred_true = model.predict(true)
+
+        plt.figure()
+        plt.hist(pred_true, bins=30, color="magenta")
+        plt.xlabel("Classifier Prob")
+        plt.ylabel("Entries")
+        plt.savefig(f"Classifier_preds_{config['CHECKPOINT_NAME']}.png", dpi=200)
         print(f"Average prediction: {np.mean(pred_true, axis=0)}")
 
     def Plot_Shower_2D(data_dict):

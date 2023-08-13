@@ -7,6 +7,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
 import matplotlib.ticker as mtick
+from tqdm import tqdm
 
 def split_data(data,nevts,frac=0.8):
     data = data.shuffle(nevts)
@@ -215,10 +216,29 @@ def DataLoader(file_name,shape,
                logE=True,
                rank=0,size=1):
     
+    e = []
+    shower = []
     with h5.File(file_name,"r") as h5f:
-        e = h5f['incident_energies'][rank:int(nevts):size].astype(np.float32)/1000.0 #in GeV
-        shower = h5f['showers'][rank:int(nevts):size].astype(np.float32)/1000.0 # in GeV
+        # e = h5f['incident_energies'][rank:int(nevts):size].astype(np.float32)/1000.0 #in GeV
+        # shower = h5f['showers'][rank:int(nevts):size].astype(np.float32)/1000.0 # in GeV
+
+        e_ = h5f['incident_energies']
+        shower_ = h5f['showers']
         
+        chunk_size = 2_000_000
+        total_entries = len(e_)
+        local_chunk_size = chunk_size // size  # Divide chunk size by the number of processes
+        
+        for start in range(rank, total_entries, local_chunk_size):
+            end = min(start + local_chunk_size, total_entries)
+            print(f"Start: {start}, End: {end}")
+            shower.append(shower_[start:end:size].astype(np.float32)/1000.0)  # This loads a chunk of data
+            e.append(e_[start:end:size].astype(np.float32)/1000.0)
+    
+    shower = np.concatenate(shower)
+    e = np.concatenate(e)
+        
+    print(f"Shower Shape: {shower.shape}")
     shower = shower.reshape(shape)
     layer = np.sum(shower,(2,3,4),keepdims=True)
     shower = np.ma.divide(shower,layer)
@@ -241,7 +261,7 @@ def DataLoader(file_name,shape,
         
 def ReverseNorm(voxels,layers,e,
                 emax,emin,logE=True,
-                datasetN=2):
+                datasetN=2, coordinates=""):
     '''Revert the transformations applied to the training set'''
     #shape=voxels.shape
 
@@ -257,8 +277,8 @@ def ReverseNorm(voxels,layers,e,
         x = x * (np.array(params['max'])-params['min']) + params['min']
         return x
 
-    voxels = _revert(voxels,'preprocessing_{}_voxel.json'.format(datasetN))
-    layers = _revert(layers,'preprocessing_{}_layers.json'.format(datasetN))
+    voxels = _revert(voxels,'preprocessing_{}_voxel{}.json'.format(datasetN, coordinates))
+    layers = _revert(layers,'preprocessing_{}_layers{}.json'.format(datasetN, coordinates))
 
     #Undo layer energy transformation
     layer_norm= np.zeros(layers.shape,dtype=np.float32)    
