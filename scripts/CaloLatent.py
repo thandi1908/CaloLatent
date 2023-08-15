@@ -139,6 +139,17 @@ class CaloLatent(keras.Model):
         self.num_steps = self.config['NSTEPS']
         self.num_layer = self.config['NLAYER']
         self.snr=self.config['SNR']
+    
+    def ChannelPermutation(self, original, num_permutations=5):
+        # Expand dimensions for the new axis
+        expanded = tf.expand_dims(original, axis=-1)
+
+        # Create cyclic permutations along the last axis
+        for i in tf.random.uniform(shape=(num_permutations,), minval=0, maxval=15, dtype=tf.int32):
+            cyclic_permutation = tf.roll(original, shift=i, axis=2)
+            expanded = tf.concat([expanded, tf.expand_dims(cyclic_permutation, axis=-1)], axis=-1)
+
+        return expanded
 
         
     
@@ -399,6 +410,8 @@ class CaloLatent(keras.Model):
     def train_step(self, inputs):
         voxel,layer,cond = inputs
         batch = tf.shape(voxel)[0]
+
+        # voxel = self.ChannelPermutation(voxel)
         
         if len(self.data_shape) == 2:
             axis=(1,2)
@@ -519,6 +532,8 @@ class CaloLatent(keras.Model):
 
         voxel,layer,cond = inputs
         batch = tf.shape(voxel)[0]
+
+        # voxel = self.ChannelPermutation(voxel)
         
         if len(self.data_shape) == 2:
             axis=(1,2)

@@ -216,6 +216,34 @@ def DataLoader(file_name,shape,
                logE=True,
                rank=0,size=1):
     
+    with h5.File(file_name,"r") as h5f:
+        e = h5f['incident_energies'][rank:int(nevts):size].astype(np.float32)/1000.0 #in GeV
+        shower = h5f['showers'][rank:int(nevts):size].astype(np.float32)/1000.0 # in GeV
+        
+    shower = shower.reshape(shape)
+    layer = np.sum(shower,(2,3,4),keepdims=True)
+    shower = np.ma.divide(shower,layer)
+        
+    def convert_energies(e,layer_energies):
+        converted = np.zeros(layer_energies.shape,dtype=np.float32)
+        converted[:,0] = np.ma.divide(np.sum(layer_energies,-1),np.squeeze(2*e)).filled(0)
+        for i in range(1,layer_energies.shape[1]):
+            converted[:,i] = np.ma.divide(layer_energies[:,i-1],np.sum(layer_energies[:,i-1:],-1)).filled(0)
+            
+        return converted
+
+    layer = convert_energies(e,np.squeeze(layer))
+
+    if logE:        
+        return shower,layer,np.log10(e/emin)/np.log10(emax/emin)
+    else:
+        return shower,layer,(e-emin)/(emax-emin)
+    
+def DataLoaderChunked(file_name,shape,
+               nevts,emax,emin,
+               logE=True,
+               rank=0,size=1):
+    
     e = []
     shower = []
     with h5.File(file_name,"r") as h5f:
@@ -340,6 +368,32 @@ def ApplyPreprocessing(data,fname):
     data = logit(data)
     data = (np.ma.divide((data-data_dict['mean']),data_dict['std']).filled(0)).astype(np.float32)
     return data
+
+def ApplyPreprocessingChunked(data, fname, chunk_size=100_000):
+    data_dict = LoadJson(fname) 
+    min_val = data_dict['min']
+    max_val = data_dict['max']
+    mean_val = data_dict['mean']
+    std_val = data_dict['std']
+
+    num_chunks = len(data) // chunk_size + (len(data) % chunk_size > 0)
+
+    preprocessed_chunks = []
+
+    for i in range(num_chunks):
+        start_idx = i * chunk_size
+        end_idx = start_idx + chunk_size
+        chunk = data[start_idx:end_idx]
+
+        chunk_normalized = np.ma.divide(chunk - min_val, np.array(max_val) - min_val).filled(0)
+        chunk_logit = logit(chunk_normalized)
+        chunk_final = (np.ma.divide(chunk_logit - mean_val, std_val).filled(0)).astype(np.float32)
+
+        preprocessed_chunks.append(chunk_final)
+
+    preprocessed_data = np.concatenate(preprocessed_chunks)
+
+    return preprocessed_data
 
 def SaveJson(save_file,data):
     with open(save_file,'w') as f:

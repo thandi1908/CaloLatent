@@ -5,6 +5,27 @@ import numpy as np
 import tensorflow_addons as tfa
 
 
+class ChannelPermutationLayer(tf.keras.layers.Layer):
+    def __init__(self, num_permutations=5):
+        super(ChannelPermutationLayer, self).__init__()
+        self.num_permutations = num_permutations
+
+    def call(self, inputs):
+        # batch_size, z, alpha, r, channels = inputs.shape
+
+        cyclic_permutations = []
+
+        # Create cyclic permutations along the alpha axis
+        for _ in range(self.num_permutations):
+            i = tf.random.uniform(shape=(), minval=0, maxval=15, dtype=tf.int32)
+            cyclic_permutation = tf.concat([inputs[:, :, i:, :, :], inputs[:, :, :i, :, :]], axis=2)
+            cyclic_permutations.append(cyclic_permutation)
+
+        # Stack the cyclic permutations along the channels axis
+        output_tensor = tf.concat([inputs] + cyclic_permutations, axis=-1)
+
+        return output_tensor
+
 def Encoder(
         input_dim,
         time_embedding,
@@ -81,13 +102,13 @@ def Encoder(
 
 
     inputs = keras.Input((input_dim))
-    
+        
     if use_1D:
         #No padding to 1D model
-        x = layers.Conv1D(input_embedding_dims, kernel_size=1)(inputs)
+        x = layers.Conv1D(input_embedding_dims, kernel_size=1)(inputs_)
         n = layers.Reshape((1,time_embedding.shape[-1]))(time_embedding)
     else:
-        inputs_padded = layers.ZeroPadding3D(pad)(inputs)
+        inputs_padded = layers.ZeroPadding3D(pad)(inputs_)
         x = layers.Conv3D(input_embedding_dims, kernel_size=1)(inputs_padded)
         n = layers.Reshape((1,1,1,time_embedding.shape[-1]))(time_embedding)
     
