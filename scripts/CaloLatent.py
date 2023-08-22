@@ -182,7 +182,7 @@ class CaloLatent(keras.Model):
                 stride=2,
                 kernel=3,
                 block_depth = 2,
-                widths = [32,64,96],
+                widths = [64,128,256],
                 attentions= [False, False, True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
@@ -249,7 +249,7 @@ class CaloLatent(keras.Model):
                 stride=2,
                 kernel=3,
                 block_depth= 2,
-                widths = [32,64,96],
+                widths = [64,128,256],
                 attentions= [False, False, True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
@@ -460,7 +460,7 @@ class CaloLatent(keras.Model):
             #Simple linear scaling
             # beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
             # beta = self.beta_cycle[self.vae_optimizer.iterations]
-            beta = 1
+            beta = 0.1
             total_loss = beta*kl_loss + reconstruction_loss
 
 
@@ -575,7 +575,7 @@ class CaloLatent(keras.Model):
         #Simple linear scaling
         # beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
         # beta = self.beta_cycle[self.vae_optimizer.iterations]
-        beta = 1
+        beta = 0.1
         total_loss = beta*kl_loss + reconstruction_loss
 
         
