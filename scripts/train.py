@@ -7,10 +7,11 @@ import horovod.tensorflow.keras as hvd
 import argparse
 import h5py as h5
 import utils
-from CaloLatent import CaloLatent
 import tensorflow_addons as tfa
 import gc
 import socket
+from CaloLatent import CaloLatent
+from architectures import EpochCallback
 
 if __name__ == '__main__':
     hvd.init()
@@ -77,8 +78,8 @@ if __name__ == '__main__':
     data = np.reshape(data,config['SHAPE'])
     layers = np.concatenate(layers)
         
-    # data = utils.CalcPreprocessing(data,"preprocessing_{}_voxel_cartesian.json".format(config['DATASET']))
-    # layers = utils.CalcPreprocessing(layers,"preprocessing_{}_layers_cartesian.json".format(config['DATASET']))
+    # data = utils.CalcPreprocessing(data,"preprocessing_{}_voxel_noise.json".format(config['DATASET']))
+    # layers = utils.CalcPreprocessing(layers,"preprocessing_{}_layers_noise.json".format(config['DATASET']))
     # sys.exit()
     data = utils.ApplyPreprocessing(data,"preprocessing_{}_voxel{}.json".format(config['DATASET'], flags.coordinates))
     layers = utils.ApplyPreprocessing(layers,"preprocessing_{}_layers{}.json".format(config['DATASET'], flags.coordinates))
@@ -103,7 +104,8 @@ if __name__ == '__main__':
     
     callbacks = [
         hvd.callbacks.BroadcastGlobalVariablesCallback(0),
-        hvd.callbacks.MetricAverageCallback(),            
+        hvd.callbacks.MetricAverageCallback(),
+        EpochCallback(epochs=NUM_EPOCHS),            
         #EarlyStopping(patience=EARLY_STOP,restore_best_weights=True),
     ]
 
@@ -142,11 +144,15 @@ if __name__ == '__main__':
         opt_layer = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_layer = hvd.DistributedOptimizer(
             opt_layer,average_aggregated_gradients=True)
+        # opt_disc = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
+        # opt_disc = hvd.DistributedOptimizer(
+        #     opt_disc,average_aggregated_gradients=True)
         
         model.compile(
             layer_optimizer = opt_layer,
             vae_optimizer=opt_vae,
-            sgm_optimizer=opt_sgm,        
+            sgm_optimizer=opt_sgm,
+            # discriminator_optimizer=opt_disc        
         )
         
     if flags.load:

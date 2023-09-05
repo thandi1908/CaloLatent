@@ -4,7 +4,7 @@ import matplotlib.ticker as mtick
 from matplotlib import gridspec
 import argparse
 import h5py as h5
-import os
+import os, sys
 import utils
 import tensorflow as tf
 from WGAN import WGAN
@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 from tensorflow import keras
 from sklearn.metrics import roc_curve, auc
 import copy
-
 
 hvd.init()
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -48,7 +47,7 @@ config = utils.LoadJson(flags.config)
 if flags.noise_dims:
     config["NOISE_DIM"] = flags.noise_dims
 
-run_classifier=False
+run_classifier=True
 ld_plot=True
 
 if flags.sample:
@@ -116,7 +115,7 @@ if flags.sample:
         layers_ = []
         m_latents = []
         t_latents = []
-        nsplit = 20
+        nsplit = 200
         split_energy = np.array_split(energies,nsplit)
         split_layer = np.array_split(layers, nsplit)
         split_data = np.array_split(data, nsplit)
@@ -166,8 +165,9 @@ else:
         energies = []
 
         if model == "vae_only":
-            # checkpoint_name = config['CHECKPOINT_NAME'].split("_")[0]
-            checkpoint_name = config['CHECKPOINT_NAME']
+            checkpoint_name = config['CHECKPOINT_NAME'].split("_")[0]
+            print("VAE-only checkpoint:",checkpoint_name)
+            # checkpoint_name = config['CHECKPOINT_NAME']
         else:
             checkpoint_name = config['CHECKPOINT_NAME']
         
@@ -181,8 +181,8 @@ else:
 
 
     if flags.model != 'all':
-        models = [flags.model]
-        # models = ["vae", "vae_only"]
+        # models = [flags.model]
+        models = ["vae", "vae_only"]
     else:
         #models = ['VPSDE','subVPSDE','VESDE','wgan','vae']
         models = [flags.model]
@@ -459,9 +459,9 @@ else:
         fig.savefig('{}/FCC_MaxEnergy_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
         return feed_dict
 
-    def Classifier(data_dict,gen_name='VAE'):
-        train = np.concatenate([data_dict['VAE+Diffusion'],data_dict[gen_name]],0)
-        labels = np.concatenate([np.zeros((data_dict['VAE+Diffusion'].shape[0],1)),
+    def Classifier(data_dict,gen_name='VAE+Diffusion'):
+        train = np.concatenate([data_dict["VAE"],data_dict[gen_name]],0)
+        labels = np.concatenate([np.zeros((data_dict["VAE"].shape[0],1)),
                                  np.ones((data_dict[gen_name].shape[0],1))],0)
         train=train.reshape((train.shape[0],-1))
         model = keras.Sequential([
@@ -478,16 +478,21 @@ else:
         pred = model.predict(train)
         fpr, tpr, _ = roc_curve(labels,pred, pos_label=1)    
         print("{} AUC: {}".format(auc(fpr, tpr),gen_name))
-        true = data_dict["Geant4"]
+        true = data_dict["VAE"]
+        m = data_dict["VAE+Diffusion"]
         true = true.reshape((true.shape[0],-1))
+        m = m.reshape((m.shape[0],-1))
         pred_true = model.predict(true)
-
+        pred_m = model.predict(m)
+        
         plt.figure()
-        plt.hist(pred_true, bins=30, color="magenta")
+        plt.hist(pred_true, bins=30, color="purple", label="VAE")
+        plt.hist(pred_m,bins=30, color="Green", label="VAE+Diffusion")
         plt.xlabel("Classifier Prob")
         plt.ylabel("Entries")
-        plt.savefig(f"Classifier_preds_{config['CHECKPOINT_NAME']}.png", dpi=200)
-        print(f"Average prediction: {np.mean(pred_true, axis=0)}")
+        plt.legend()
+        plt.savefig(f"Classifier_preds_{config['CHECKPOINT_NAME']}_models.png", dpi=200)
+        # print(f"Average prediction: {np.mean(pred_true, axis=0)}")
 
     def Plot_Shower_2D(data_dict):
         #cmap = plt.get_cmap('PiYG')
@@ -527,7 +532,7 @@ else:
                     vmax = np.nanmax(average[:,:,0])
                     vmin = np.nanmin(average[:,:,0])
                     #print(vmin,vmax)
-                im = ax.pcolormesh(range(average.shape[0]), range(average.shape[1]), average[:,:,0], cmap=cmap)
+                im = ax.pcolormesh(range(average.shape[1]), range(average.shape[0]), average[:,:,0], cmap=cmap)
 
                 yScalarFormatter = utils.ScalarFormatterClass(useMathText=True)
                 yScalarFormatter.set_powerlimits((0,0))
@@ -553,7 +558,7 @@ else:
         pass
         plot_routines['Max voxel']=HistMaxE
     else:
-        pass
+        # pass
         plot_routines['Shower width']=AverageShowerWidth        
         plot_routines['Energy per eta']=AverageEX
         plot_routines['Energy per phi']=AverageEY

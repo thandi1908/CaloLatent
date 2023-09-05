@@ -27,8 +27,8 @@ line_style = {
 colors = {
     'Geant4':'black',
     'WGAN-GP':'#e7298a',
-    'VAE+Diffusion':'#7570b3',
-    'VAE': '#AEB370'
+    'VAE+Diffusion':'#4151b8',
+    'VAE': '#51b841'
 }
 
 name_translate={
@@ -221,6 +221,7 @@ def DataLoader(file_name,shape,
         shower = h5f['showers'][rank:int(nevts):size].astype(np.float32)/1000.0 # in GeV
         
     shower = shower.reshape(shape)
+    # shower = shower + np.random.rand(*shower.shape)*1e-6
     layer = np.sum(shower,(2,3,4),keepdims=True)
     shower = np.ma.divide(shower,layer)
         
@@ -303,6 +304,7 @@ def ReverseNorm(voxels,layers,e,
         x = x*params['std'] + params['mean']
         x = revert_logit(x)        
         x = x * (np.array(params['max'])-params['min']) + params['min']
+        # x = np.where(x < 1e-5, np.ones_like(x)*1e-11, x)
         return x
 
     voxels = _revert(voxels,'preprocessing_{}_voxel{}.json'.format(datasetN, coordinates))
@@ -321,7 +323,8 @@ def ReverseNorm(voxels,layers,e,
 
     voxels /= np.sum(voxels,(2,3,4),keepdims=True)
     voxels*=layer_norm.reshape((-1,layer_norm.shape[1],1,1,1))
-
+    
+    # voxels = np.where(voxels < 1e-5, np.zeros_like(voxels), voxels)
 
     
     return voxels,energy
@@ -346,7 +349,7 @@ def CalcPreprocessing(data,fname):
         'max':np.max(data,0).tolist(),
         'min':np.min(data,0).tolist(),
     }
-
+    # data = data + np.random.uniform(0, 1e-9, size=data.shape)
     data = np.ma.divide(data-data_dict['min'],np.array(data_dict['max'])- data_dict['min']).filled(0)
     data = logit(data)
         
@@ -364,6 +367,7 @@ def CalcPreprocessing(data,fname):
 
 def ApplyPreprocessing(data,fname):
     data_dict = LoadJson(fname)
+    # data = data + np.random.uniform(0, 1e-9, size=data.shape)
     data = np.ma.divide(data-data_dict['min'],np.array(data_dict['max'])- data_dict['min']).filled(0)
     data = logit(data)
     data = (np.ma.divide((data-data_dict['mean']),data_dict['std']).filled(0)).astype(np.float32)
