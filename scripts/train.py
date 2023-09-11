@@ -135,24 +135,29 @@ if __name__ == '__main__':
         lr_schedule = tf.keras.experimental.CosineDecay(
             initial_learning_rate=LR*hvd.size(), decay_steps=NUM_EPOCHS*int(data_size*flags.frac/BATCH_SIZE)
         )
-        opt_vae = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
-        opt_vae = hvd.DistributedOptimizer(
-            opt_vae,average_aggregated_gradients=True)        
+        
+        # VAE Optimizers
+        opt_encoder = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
+        opt_encoder = hvd.DistributedOptimizer(
+            opt_encoder,average_aggregated_gradients=True)  
+        opt_dec = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
+        opt_dec = hvd.DistributedOptimizer(
+            opt_dec,average_aggregated_gradients=True)      
+        
+        # Diffusion optimizers
         opt_sgm = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_sgm = hvd.DistributedOptimizer(
             opt_sgm,average_aggregated_gradients=True)
         opt_layer = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_layer = hvd.DistributedOptimizer(
             opt_layer,average_aggregated_gradients=True)
-        opt_dec = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
-        opt_dec = hvd.DistributedOptimizer(
-            opt_dec,average_aggregated_gradients=True)
+        
         
         model.compile(
             layer_optimizer = opt_layer,
-            vae_optimizer=opt_vae,
+            encoder_optimizer=opt_encoder,
             sgm_optimizer=opt_sgm,
-            # decoder_optimizer=opt_dec        
+            decoder_optimizer=opt_dec        
         )
         
     if flags.load:
