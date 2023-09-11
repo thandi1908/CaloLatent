@@ -356,7 +356,7 @@ class CaloLatent(keras.Model):
             # self.generator_loss_tracker
         ]
 
-    def compile(self,vae_optimizer, sgm_optimizer,layer_optimizer): #discriminator_optimizer):
+    def compile(self,vae_optimizer, sgm_optimizer,layer_optimizer, decoder_optimizer): #discriminator_optimizer):
         super(CaloLatent, self).compile(experimental_run_tf_function=False,
                                         weighted_metrics=[],
                                         # run_eagerly=True
@@ -364,7 +364,7 @@ class CaloLatent(keras.Model):
         self.vae_optimizer = vae_optimizer
         self.sgm_optimizer = sgm_optimizer
         self.layer_optimizer = layer_optimizer
-        # self.discriminator_optimizer = discriminator_optimizer
+        self.decoder_optimizer = decoder_optimizer
 
 
     def cross_entropy_const(self,t=1e-5):
@@ -384,6 +384,11 @@ class CaloLatent(keras.Model):
         opt.apply_gradients(zip(grads, weights))
         return tf.constant(10)
     
+    def set_encoder_trainable(self, is_trainable):
+        self.encoder.trainable = is_trainable
+
+        return tf.constant(10)
+
     def discriminator_loss(self, real_output, fake_output):
         cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=False)
         real_loss = cross_entropy(tf.ones_like(real_output), real_output)
@@ -460,13 +465,8 @@ class CaloLatent(keras.Model):
 
         
         # with tf.GradientTape() as tape, tf.GradientTape() as disc_tape:
-        with tf.GradientTape() as tape:
-            # Make the encoder part of the VAE untrain-able when the diffusion model is turned on
-            train = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
-                            lambda:self.false_fn(), lambda:self.true_fn())
-            # print(train)
-            # train = True
-            z_mean, z_log_sig, z = self.encoder([voxel,cond,layer], training=train)
+        with tf.GradientTape() as tape, tf.GradientTape() as dec_tape:
+            z_mean, z_log_sig, z = self.encoder([voxel,cond,layer])
                         
             vae_neg_entropy = distributions.MultivariateNormalDiag(
                 loc=z_mean,allow_nan_stats=False,
@@ -477,7 +477,7 @@ class CaloLatent(keras.Model):
                 scale_diag=tf.ones_like(z_mean)).log_prob(z)
             
             #VAE reconstruction
-            rec,log_std= tf.split(self.decoder([z,cond,layer], training=True),num_or_size_splits=2, axis=-1)
+            rec,log_std= tf.split(self.decoder([z,cond,layer]),num_or_size_splits=2, axis=-1)
             reconstruction_loss = self.reconstruction_loss(voxel,rec,log_std,axis=axis)
             
             cross_entropy_per_var,coeff = self.get_diffusion_loss(z,[cond,layer],batch,model=self.latent_diffusion,weighted=True)
@@ -504,6 +504,11 @@ class CaloLatent(keras.Model):
                                  lambda:self.vae_beta
                                  )
             total_loss = beta*kl_loss + reconstruction_loss
+
+            total_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+                                 lambda: 0.0,
+                                 lambda:total_loss
+                                 )
             # discriminator losses
             # real_output = self.discriminator([voxel], training=True)
             # fake_output = self.discriminator([rec], training=True)
@@ -513,29 +518,33 @@ class CaloLatent(keras.Model):
 
             # total_loss = beta*kl_loss + reconstruction_loss + 20*gen_loss
         
-        vae_weights = self.encoder.trainable_weights + self.decoder.trainable_weights 
+        # vae_weights = self.encoder.trainable_weights + self.decoder.trainable_weights 
 
-        # print(f"OS : {self.sgm_optimizer.iterations}, WU: {self.warm_up_steps}")
-        # tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
-        #         lambda: tf.constant(10), lambda: self.opt_step(tape,total_loss,vae_weights,self.vae_optimizer))
-        
-        
-        grads = tape.gradient(total_loss, vae_weights)
+        encoder_weights = self.encoder.trainable_weights
+        decoder_weights = self.decoder.trainable_weights
+
+        # vae_weights = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+        #                     lambda: self.decoder.trainable_weights, lambda: self.encoder.trainable_weights + self.decoder.trainable_weights)
+
+        grads = tape.gradient(total_loss, encoder_weights)
         grads = [tf.clip_by_norm(grad, 1)
                 for grad in grads]
         
-        self.vae_optimizer.apply_gradients(zip(grads, vae_weights))
+        self.vae_optimizer.apply_gradients(zip(grads, encoder_weights))
 
         tf.cond(self.warm_up_steps == self.sgm_optimizer.iterations,
             lambda: self.reset_opt(self.vae_optimizer), lambda: tf.constant(10))
+        
+        # tf.cond(self.warm_up_steps == self.sgm_optimizer.iterations,
+        #         lambda: self.set_encoder_trainable(False) , lambda: tf.constant(10))
 
-        # discriminator_gradients = disc_tape.gradient(disc_loss,
-        #                                        self.discriminator.trainable_variables)
+        dec_gradients = dec_tape.gradient(reconstruction_loss, decoder_weights)
+
+        dec_gradients = [tf.clip_by_norm(grad, 1)
+                for grad in dec_gradients]
         
-        # self.discriminator_optimizer.apply_gradients(zip(discriminator_gradients,
-        #                                       self.discriminator.trainable_variables))
-        
-        
+        self.decoder_optimizer.apply_gradients(zip(dec_gradients, decoder_weights))
+
         self.reconstruction_loss_tracker.update_state(reconstruction_loss)
         self.kl_loss_tracker.update_state(beta*kl_loss)
         # self.discriminator_loss_tracker.update_state(disc_loss)
@@ -649,6 +658,11 @@ class CaloLatent(keras.Model):
                                  )
         total_loss = beta*kl_loss + reconstruction_loss 
 
+        total_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+                                 lambda: 0.0,
+                                 lambda:total_loss
+                                 )
+
         # discriminator losses
         # real_output = self.discriminator(voxel)
         # fake_output = self.discriminator(rec)
@@ -708,7 +722,7 @@ class CaloLatent(keras.Model):
     
     def generate(self,nevts,cond, sample_encoder=False, layer=None, data=None):
 
-        dim = 3
+        dim = np.random.randint(0,self.latent_dim)
 
         layer_energies = self.PCSampler([cond], batch_size = cond.shape[0],
                                         ndim=self.num_layer,

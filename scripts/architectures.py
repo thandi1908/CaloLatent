@@ -5,26 +5,13 @@ import numpy as np
 import tensorflow_addons as tfa
 
 
-class ChannelPermutationLayer(tf.keras.layers.Layer):
-    def __init__(self, num_permutations=5):
-        super(ChannelPermutationLayer, self).__init__()
-        self.num_permutations = num_permutations
+class EpochCallback(tf.keras.callbacks.Callback):
+    def __init__(self, epochs):
+        super().__init__()
+        self.epochs = epochs
 
-    def call(self, inputs):
-        # batch_size, z, alpha, r, channels = inputs.shape
-
-        cyclic_permutations = []
-
-        # Create cyclic permutations along the alpha axis
-        for _ in range(self.num_permutations):
-            i = tf.random.uniform(shape=(), minval=0, maxval=15, dtype=tf.int32)
-            cyclic_permutation = tf.concat([inputs[:, :, i:, :, :], inputs[:, :, :i, :, :]], axis=2)
-            cyclic_permutations.append(cyclic_permutation)
-
-        # Stack the cyclic permutations along the channels axis
-        output_tensor = tf.concat([inputs] + cyclic_permutations, axis=-1)
-
-        return output_tensor
+    def on_epoch_begin(self, epoch, logs=None):
+        self.model.current_epoch = epoch
 
 def Encoder(
         input_dim,
@@ -77,7 +64,7 @@ def Encoder(
                         num_heads=1, key_dim=width, attention_axes=(1)
                     )(x, x)
                 else:
-                    # x = tfa.layers.GroupNormalization(groups=4, center=False, scale=False)(x)
+                    x = tfa.layers.GroupNormalization(groups=4, center=False, scale=False)(x)
                     x = layers.MultiHeadAttention(
                         num_heads=1, key_dim=width, attention_axes=(1, 2, 3)
                     )(x, x)
@@ -105,10 +92,10 @@ def Encoder(
         
     if use_1D:
         #No padding to 1D model
-        x = layers.Conv1D(input_embedding_dims, kernel_size=1)(inputs_)
+        x = layers.Conv1D(input_embedding_dims, kernel_size=1)(inputs)
         n = layers.Reshape((1,time_embedding.shape[-1]))(time_embedding)
     else:
-        inputs_padded = layers.ZeroPadding3D(pad)(inputs_)
+        inputs_padded = layers.ZeroPadding3D(pad)(inputs)
         x = layers.Conv3D(input_embedding_dims, kernel_size=1)(inputs_padded)
         n = layers.Reshape((1,1,1,time_embedding.shape[-1]))(time_embedding)
     
@@ -245,3 +232,59 @@ def Resnet(
     outputs = layers.Dense(input_dim)(layer)
     
     return inputs,outputs
+
+def Discriminator(
+        input_dim,
+        num_layers = 3,
+        mlp_width = 256
+        ):
+    
+    act = layers.LeakyReLU(alpha=0.01)
+    inputs = Input((input_dim))
+    inputs_ = tf.reshape(inputs, shape=(tf.shape(inputs)[0], 45, 16 * 9 * 1))
+    x = layers.Dense(mlp_width)(inputs_)
+    
+    for _ in range(num_layers-1):
+        x = act(layers.Dense(mlp_width)(x))
+        
+    outputs = layers.Dense(1,activation='sigmoid')(x)
+    return inputs, outputs
+
+def PatchDiscriminator(
+   data_format = "channels_first",
+   pad = [[0,0], [2,1]], 
+   initializer = tf.random_normal_initializer(0., 0.02)    
+):
+
+  def conv2d(filters, size, apply_batchnorm=True):
+    result = tf.keras.Sequential()
+    result.add(
+        tf.keras.layers.Conv2D(filters, size, strides=2, padding='same',
+                              kernel_initializer=initializer, use_bias=False, data_format=data_format))
+
+    if apply_batchnorm:
+      result.add(tf.keras.layers.BatchNormalization())
+
+    result.add(tf.keras.layers.LeakyReLU())
+
+    return result
+
+  inp = tf.keras.layers.Input(shape=[45, 16, 9], name='input_image')
+  conv1 = conv2d(64, 3, False)(inp)
+  conv2 = conv2d(128, 3)(conv1)
+
+  zero_pad1 = tf.keras.layers.ZeroPadding2D(data_format=data_format)(conv2)  
+  conv3 = tf.keras.layers.Conv2D(512, 3, strides=1,
+                                kernel_initializer=initializer,
+                                use_bias=False, data_format=data_format)(zero_pad1) 
+
+  batchnorm1 = tf.keras.layers.BatchNormalization()(conv3)
+
+  leaky_relu = tf.keras.layers.LeakyReLU()(batchnorm1)
+
+  zero_pad2 = tf.keras.layers.ZeroPadding2D(data_format=data_format)(leaky_relu) 
+
+  last = tf.keras.layers.Conv2D(45, 3, strides=1,
+                                kernel_initializer=initializer, data_format=data_format, activation="sigmoid")(zero_pad2)
+
+  return inp, last

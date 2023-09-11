@@ -46,7 +46,7 @@ def SetStyle():
     rc('font', size=22)
     rc('xtick', labelsize=15)
     rc('ytick', labelsize=15)
-    rc('legend', fontsize=15)
+    rc('legend', fontsize=17)
 
     # #
     mpl.rcParams.update({'font.size': 19})
@@ -108,7 +108,7 @@ def PlotRoutine(feed_dict,xlabel='',ylabel='',reference_name='Geant4',emd=True):
                 
         
     FormatFig(xlabel = "", ylabel = ylabel,ax0=ax0)
-    ax0.legend(loc='best',fontsize=13,ncol=1)
+    ax0.legend(loc='best',fontsize=17,ncol=1)
 
     plt.ylabel('Difference. (%)')
     plt.xlabel(xlabel)
@@ -176,7 +176,7 @@ def HistRoutine(feed_dict,xlabel='',ylabel='',reference_name='Geant4',logy=False
                 emdval = GetEMD(feed_dict[reference_name],feed_dict[plot])
                 plot_label = r"{}, EMD :{:.2f}".format(plot,emdval)
                 
-            dist,_,_=ax0.hist(feed_dict[plot],bins=binning,label=plot_label,linestyle=line_style[plot],color=colors[plot],density=True,histtype="step")
+            dist,_,_=ax0.hist(feed_dict[plot],bins=binning,label=plot_label,linestyle=line_style[plot],color=colors[plot],density=True,histtype="step", lw=1)
             
         if reference_name!=plot:
             ratio = 100*np.divide(reference_hist-dist,reference_hist)
@@ -185,7 +185,7 @@ def HistRoutine(feed_dict,xlabel='',ylabel='',reference_name='Geant4',logy=False
             else:
                 ax1.plot(xaxis,ratio,color=colors[plot],marker='o',ms=10,lw=0,markerfacecolor='none',markeredgewidth=3)
         
-    ax0.legend(loc=label_loc,fontsize=13,ncol=1)        
+    ax0.legend(loc=label_loc,fontsize=17,ncol=1)        
     FormatFig(xlabel = "", ylabel = ylabel,ax0=ax0) 
 
     if logy:
@@ -398,6 +398,43 @@ def ApplyPreprocessingChunked(data, fname, chunk_size=100_000):
     preprocessed_data = np.concatenate(preprocessed_chunks)
 
     return preprocessed_data
+def train_test_split(x, y, test_ratio=0.2, random_seed=42):
+    """
+    Splits input features (x) and target values (y) into training and testing subsets
+
+    Parameters:
+    - x: The input features (numpy array or list).
+    - y: The corresponding target values (numpy array or list).
+    - test_ratio: The proportion of the data to include in the test set (default is 0.2).
+    - random_seed: An optional random seed for reproducibility (default is 42).
+
+    Returns:
+    - train_x: The training features.
+    - test_x: The testing features.
+    - train_y: The training target values.
+    - test_y: The testing target values.
+    """
+    if random_seed is not None:
+        np.random.seed(random_seed)
+    
+    # Combine x and y into a single array
+    data = list(zip(x, y))
+    
+    # Randomly shuffle the data
+    np.random.shuffle(data)
+    
+    # Calculate the number of samples for the test set
+    num_test_samples = int(len(data) * test_ratio)
+    
+    # Split the data into training and testing sets
+    train_data = data[:-num_test_samples]
+    test_data = data[-num_test_samples:]
+    
+    # Unpack the training and testing sets into x and y
+    train_x, train_y = zip(*train_data)
+    test_x, test_y = zip(*test_data)
+    
+    return np.array(train_x), np.array(test_x), np.array(train_y), np.array(test_y)
 
 def SaveJson(save_file,data):
     with open(save_file,'w') as f:

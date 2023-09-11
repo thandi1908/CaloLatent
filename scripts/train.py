@@ -10,7 +10,7 @@ import utils
 import tensorflow_addons as tfa
 import gc
 import socket
-from CaloLatent import CaloLatent
+from CaloLatentFull import CaloLatent
 from architectures import EpochCallback
 
 if __name__ == '__main__':
@@ -144,15 +144,15 @@ if __name__ == '__main__':
         opt_layer = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_layer = hvd.DistributedOptimizer(
             opt_layer,average_aggregated_gradients=True)
-        # opt_disc = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
-        # opt_disc = hvd.DistributedOptimizer(
-        #     opt_disc,average_aggregated_gradients=True)
+        opt_dec = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
+        opt_dec = hvd.DistributedOptimizer(
+            opt_dec,average_aggregated_gradients=True)
         
         model.compile(
             layer_optimizer = opt_layer,
             vae_optimizer=opt_vae,
             sgm_optimizer=opt_sgm,
-            # discriminator_optimizer=opt_disc        
+            # decoder_optimizer=opt_dec        
         )
         
     if flags.load:
@@ -161,7 +161,7 @@ if __name__ == '__main__':
 
     if hvd.rank()==0:
         checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
-        checkpoint = ModelCheckpoint('{}/checkpoint'.format(checkpoint_folder),
+        checkpoint = ModelCheckpoint(f"{checkpoint_folder}/"+"checkpoint-{epoch:02d}",
                                      save_best_only=False,mode='auto',
                                      period=1,save_weights_only=True)
         callbacks.append(checkpoint)

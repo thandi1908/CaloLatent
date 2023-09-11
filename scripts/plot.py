@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from tensorflow import keras
 from sklearn.metrics import roc_curve, auc
 import copy
+from utils import train_test_split
 
 hvd.init()
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -47,7 +48,7 @@ config = utils.LoadJson(flags.config)
 if flags.noise_dims:
     config["NOISE_DIM"] = flags.noise_dims
 
-run_classifier=True
+run_classifier=False
 ld_plot=True
 
 if flags.sample:
@@ -108,7 +109,7 @@ if flags.sample:
         hvd.init()
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
                            config=config, name=flags.model)
-        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
+        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint-797')).expect_partial()
         start = time.time()        
         print("start sampling")
         voxels=[]
@@ -286,7 +287,7 @@ else:
         ax.set_yscale("log")
         ax.set_xscale("log")
         ax.legend(loc='best',fontsize=16,ncol=1)
-        fig.savefig('{}/FCC_Scatter_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_Scatter_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), dpi=600, bbox_inches="tight")
 
 
     def AverageShowerWidth(data_dict):
@@ -335,13 +336,13 @@ else:
             
 
         fig,ax0 = utils.PlotRoutine(feed_dict_eta,xlabel='Layer number', ylabel= 'x-center of energy')
-        fig.savefig('{}/FCC_EtaEC_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_EtaEC_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         fig,ax0 = utils.PlotRoutine(feed_dict_phi,xlabel='Layer number', ylabel= 'y-center of energy')
-        fig.savefig('{}/FCC_PhiEC_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_PhiEC_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         fig,ax0 = utils.PlotRoutine(feed_dict_eta2,xlabel='Layer number', ylabel= 'x-width')
-        fig.savefig('{}/FCC_EtaW_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_EtaW_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         fig,ax0 = utils.PlotRoutine(feed_dict_phi2,xlabel='Layer number', ylabel= 'y-width')
-        fig.savefig('{}/FCC_PhiW_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_PhiW_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
 
         return feed_dict_eta2
 
@@ -359,7 +360,7 @@ else:
             feed_dict[key] = _preprocess(data_dict[key])
 
         fig,ax0 = utils.PlotRoutine(feed_dict,xlabel='Layer number', ylabel= 'Mean deposited energy [GeV]')
-        fig.savefig('{}/FCC_EnergyZ_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_EnergyZ_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
 
     def AverageEX(data_dict):
@@ -375,7 +376,7 @@ else:
             feed_dict[key] = _preprocess(data_dict[key])
     
         fig,ax0 = utils.PlotRoutine(feed_dict,xlabel='x-bin', ylabel= 'Mean Energy [GeV]')
-        fig.savefig('{}/FCC_EnergyX_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_EnergyX_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
         
     def AverageEY(data_dict):
@@ -391,7 +392,7 @@ else:
             feed_dict[key] = _preprocess(data_dict[key])
     
         fig,ax0 = utils.PlotRoutine(feed_dict,xlabel='y-bin', ylabel= 'Mean Energy [GeV]')
-        fig.savefig('{}/FCC_EnergyY_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_EnergyY_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
 
     def HistEtot(data_dict):
@@ -407,7 +408,7 @@ else:
         binning = np.geomspace(np.quantile(feed_dict['Geant4'],0.01),np.quantile(feed_dict['Geant4'],1.0),10)
         fig,ax0 = utils.HistRoutine(feed_dict,xlabel='Deposited energy [GeV]', ylabel= 'Normalized entries',logy=True,binning=binning)
         ax0.set_xscale("log")
-        fig.savefig('{}/FCC_TotalE_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_TotalE_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
         
     def HistNhits(data_dict):
@@ -420,11 +421,12 @@ else:
         for key in data_dict:
             feed_dict[key] = _preprocess(data_dict[key])
             
-        fig,ax0 = utils.HistRoutine(feed_dict,xlabel='Number of hits', ylabel= 'Normalized entries',label_loc='upper left')
+        # fig,ax0 = utils.HistRoutine(feed_dict,xlabel='Number of hits', ylabel= 'Normalized entries',label_loc='upper left')
+        fig,ax0 = utils.HistRoutine(feed_dict,xlabel='Number of hits', ylabel= 'Normalized entries',label_loc='best')
         yScalarFormatter = utils.ScalarFormatterClass(useMathText=True)
         yScalarFormatter.set_powerlimits((0,0))
         ax0.yaxis.set_major_formatter(yScalarFormatter)
-        fig.savefig('{}/FCC_Nhits_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_Nhits_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
     def HistMaxELayer(data_dict):
 
@@ -439,7 +441,7 @@ else:
             feed_dict[key] = _preprocess(data_dict[key])
 
         fig,ax0 = utils.PlotRoutine(feed_dict,xlabel='Layer number', ylabel= 'Max. voxel/Dep. energy')
-        fig.savefig('{}/FCC_MaxEnergyZ_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_MaxEnergyZ_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
 
     def HistMaxE(data_dict):
@@ -456,14 +458,18 @@ else:
 
         binning = np.linspace(0,1,10)
         fig,ax0 = utils.HistRoutine(feed_dict,ylabel='Normalized entries', xlabel= 'Max. voxel/Dep. energy',binning=binning,logy=True)
-        fig.savefig('{}/FCC_MaxEnergy_{}_{}.pdf'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model))
+        fig.savefig('{}/FCC_MaxEnergy_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
 
     def Classifier(data_dict,gen_name='VAE+Diffusion'):
         train = np.concatenate([data_dict["VAE"],data_dict[gen_name]],0)
         labels = np.concatenate([np.zeros((data_dict["VAE"].shape[0],1)),
                                  np.ones((data_dict[gen_name].shape[0],1))],0)
+        
         train=train.reshape((train.shape[0],-1))
+        train, test, labels, test_labels = train_test_split(train, labels)
+
+
         model = keras.Sequential([
             keras.layers.Dense(256, activation='relu'),
             keras.layers.Dense(256, activation='relu'),
@@ -475,24 +481,26 @@ else:
                       metrics=['accuracy'])
         
         model.fit(train, labels,batch_size=100, epochs=3, verbose=2)
-        pred = model.predict(train)
-        fpr, tpr, _ = roc_curve(labels,pred, pos_label=1)    
+        pred = model.predict(test)
+        fpr, tpr, _ = roc_curve(test_labels,pred, pos_label=1)    
         print("{} AUC: {}".format(auc(fpr, tpr),gen_name))
-        true = data_dict["VAE"]
-        m = data_dict["VAE+Diffusion"]
-        true = true.reshape((true.shape[0],-1))
-        m = m.reshape((m.shape[0],-1))
-        pred_true = model.predict(true)
-        pred_m = model.predict(m)
+    
+        geant = data_dict["Geant4"][:20_000]
+        geant = geant.reshape((geant.shape[0],-1))
+        pred_geant = model.predict(geant)
         
-        plt.figure()
-        plt.hist(pred_true, bins=30, color="purple", label="VAE")
-        plt.hist(pred_m,bins=30, color="Green", label="VAE+Diffusion")
-        plt.xlabel("Classifier Prob")
+        plt.figure(figsize=(8,6))
+        plt.hist(pred[np.where(test_labels==0)], bins=20, color="#51b841", label="VAE", histtype="step", lw=3)
+        plt.hist(pred[np.where(test_labels==1)],bins=20, color="#4151b8", label="VAE+Diffusion",  histtype="step", lw=3)
+        plt.hist(pred_geant,bins=20, color="black", label="Geant4",  histtype="step", lw=2.5, linestyle="dashed")
+        plt.xlabel("Classifier Probability")
+        plt.yscale("log")
         plt.ylabel("Entries")
         plt.legend()
-        plt.savefig(f"Classifier_preds_{config['CHECKPOINT_NAME']}_models.png", dpi=200)
-        # print(f"Average prediction: {np.mean(pred_true, axis=0)}")
+        plt.savefig(f"Classifier_preds_{config['CHECKPOINT_NAME']}_models.png", dpi=500, bbox_inches="tight")
+        
+        
+        print(f"Average prediction: {np.mean(pred_geant, axis=0)}")
 
     def Plot_Shower_2D(data_dict):
         #cmap = plt.get_cmap('PiYG')
@@ -543,7 +551,7 @@ else:
                 
                 bar = ax.set_title("{}, layer number {}".format(key,layer),fontsize=15)
 
-                fig.savefig('{}/FCC_{}2D_{}_{}_{}.pdf'.format(flags.plot_folder,key,layer,config['CHECKPOINT_NAME'],flags.model))
+                fig.savefig('{}/FCC_{}2D_{}_{}_{}.png'.format(flags.plot_folder,key,layer,config['CHECKPOINT_NAME'],flags.model))
             
 
     high_level = []
