@@ -10,8 +10,9 @@ import utils
 import tensorflow_addons as tfa
 import gc
 import socket
-from CaloLatentFull import CaloLatent
+from CaloLatent import CaloLatent
 from architectures import EpochCallback
+from learning_rate import CosineDecay_
 
 if __name__ == '__main__':
     hvd.init()
@@ -132,9 +133,16 @@ if __name__ == '__main__':
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
                            config=config, name=flags.model)
         
-        lr_schedule = tf.keras.experimental.CosineDecay(
+        lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
             initial_learning_rate=LR*hvd.size(), decay_steps=NUM_EPOCHS*int(data_size*flags.frac/BATCH_SIZE)
         )
+
+        # latent_lr_schedule = CosineDecay_(
+        #     initial_learning_rate=LR*hvd.size(),
+        #     decay_steps=NUM_EPOCHS*int(data_size*flags.frac/BATCH_SIZE),
+        #     warmup_target=LR*hvd.size(),
+        #     warmup_steps = 1000*624//hvd.size()
+        # )
         
         # VAE Optimizers
         opt_encoder = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
@@ -145,7 +153,7 @@ if __name__ == '__main__':
             opt_dec,average_aggregated_gradients=True)      
         
         # Diffusion optimizers
-        opt_sgm = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
+        opt_sgm = tf.keras.optimizers.legacy.Adam(LR*hvd.size())
         opt_sgm = hvd.DistributedOptimizer(
             opt_sgm,average_aggregated_gradients=True)
         opt_layer = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)

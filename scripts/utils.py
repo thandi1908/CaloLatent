@@ -20,20 +20,20 @@ def split_data(data,nevts,frac=0.8):
 line_style = {
     'Geant4':'dotted',
     'WGAN-GP':'-',
-    'VAE+Diffusion':'-',
+    'CaloLatent':'-',
     'VAE': '-'
 }
 
 colors = {
     'Geant4':'black',
     'WGAN-GP':'#e7298a',
-    'VAE+Diffusion':'#4151b8',
+    'CaloLatent':'#4151b8',
     'VAE': '#51b841'
 }
 
 name_translate={
     'wgan':'WGAN-GP',
-    'vae':'VAE+Diffusion',
+    'vae':'CaloLatent',
     'vae_only': 'VAE'
     }
 

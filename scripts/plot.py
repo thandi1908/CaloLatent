@@ -109,14 +109,14 @@ if flags.sample:
         hvd.init()
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
                            config=config, name=flags.model)
-        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint-797')).expect_partial()
+        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint-439')).expect_partial()
         start = time.time()        
         print("start sampling")
         voxels=[]
         layers_ = []
         m_latents = []
         t_latents = []
-        nsplit = 200
+        nsplit = 100
         split_energy = np.array_split(energies,nsplit)
         split_layer = np.array_split(layers, nsplit)
         split_data = np.array_split(data, nsplit)
@@ -139,7 +139,7 @@ if flags.sample:
         #plot latent_dims
         if ld_plot:
             dict_ = {
-                "vae": "VAE+Diffusion",
+                "vae": "CaloLatent",
                 "vae_only": "VAE"
             }
             plt.figure()
@@ -182,8 +182,8 @@ else:
 
 
     if flags.model != 'all':
-        # models = [flags.model]
-        models = ["vae", "vae_only"]
+        models = [flags.model]
+        # models = ["vae", "vae_only"]
     else:
         #models = ['VPSDE','subVPSDE','VESDE','wgan','vae']
         models = [flags.model]
@@ -339,9 +339,9 @@ else:
         fig.savefig('{}/FCC_EtaEC_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         fig,ax0 = utils.PlotRoutine(feed_dict_phi,xlabel='Layer number', ylabel= 'y-center of energy')
         fig.savefig('{}/FCC_PhiEC_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
-        fig,ax0 = utils.PlotRoutine(feed_dict_eta2,xlabel='Layer number', ylabel= 'x-width')
+        fig,ax0 = utils.PlotRoutine(feed_dict_eta2,xlabel='Layer number', ylabel= 'r-width')
         fig.savefig('{}/FCC_EtaW_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
-        fig,ax0 = utils.PlotRoutine(feed_dict_phi2,xlabel='Layer number', ylabel= 'y-width')
+        fig,ax0 = utils.PlotRoutine(feed_dict_phi2,xlabel='Layer number', ylabel= '$\\alpha$-width')
         fig.savefig('{}/FCC_PhiW_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
 
         return feed_dict_eta2
@@ -375,7 +375,7 @@ else:
         for key in data_dict:
             feed_dict[key] = _preprocess(data_dict[key])
     
-        fig,ax0 = utils.PlotRoutine(feed_dict,xlabel='x-bin', ylabel= 'Mean Energy [GeV]')
+        fig,ax0 = utils.PlotRoutine(feed_dict,xlabel='r-bin', ylabel= 'Mean Energy [GeV]')
         fig.savefig('{}/FCC_EnergyX_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
         
@@ -391,7 +391,7 @@ else:
         for key in data_dict:
             feed_dict[key] = _preprocess(data_dict[key])
     
-        fig,ax0 = utils.PlotRoutine(feed_dict,xlabel='y-bin', ylabel= 'Mean Energy [GeV]')
+        fig,ax0 = utils.PlotRoutine(feed_dict,xlabel='$\\alpha$-bin', ylabel= 'Mean Energy [GeV]')
         fig.savefig('{}/FCC_EnergyY_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
 
@@ -461,7 +461,7 @@ else:
         fig.savefig('{}/FCC_MaxEnergy_{}_{}.png'.format(flags.plot_folder,config['CHECKPOINT_NAME'],flags.model), bbox_inches="tight", dpi=600)
         return feed_dict
 
-    def Classifier(data_dict,gen_name='VAE+Diffusion'):
+    def Classifier(data_dict,gen_name='CaloLatent'):
         train = np.concatenate([data_dict["VAE"],data_dict[gen_name]],0)
         labels = np.concatenate([np.zeros((data_dict["VAE"].shape[0],1)),
                                  np.ones((data_dict[gen_name].shape[0],1))],0)
@@ -491,7 +491,7 @@ else:
         
         plt.figure(figsize=(8,6))
         plt.hist(pred[np.where(test_labels==0)], bins=20, color="#51b841", label="VAE", histtype="step", lw=3)
-        plt.hist(pred[np.where(test_labels==1)],bins=20, color="#4151b8", label="VAE+Diffusion",  histtype="step", lw=3)
+        plt.hist(pred[np.where(test_labels==1)],bins=20, color="#4151b8", label="CaloLatent",  histtype="step", lw=3)
         plt.hist(pred_geant,bins=20, color="black", label="Geant4",  histtype="step", lw=2.5, linestyle="dashed")
         plt.xlabel("Classifier Probability")
         plt.yscale("log")
@@ -534,7 +534,7 @@ else:
 
             vmin=vmax=0
             for ik,key in enumerate(['Geant4',utils.name_translate[flags.model]]):
-                fig,ax = SetFig("x-bin","y-bin")
+                fig,ax = SetFig("r-bin","$\\alpha$-bin")
                 average = _preprocess(data_dict[key])
                 if vmax==0:
                     vmax = np.nanmax(average[:,:,0])
@@ -570,7 +570,7 @@ else:
         plot_routines['Shower width']=AverageShowerWidth        
         plot_routines['Energy per eta']=AverageEX
         plot_routines['Energy per phi']=AverageEY
-        # plot_routines['2D average shower']=Plot_Shower_2D
+        plot_routines['2D average shower']=Plot_Shower_2D
         plot_routines['Max voxel']=HistMaxELayer
         if run_classifier:
             plot_routines['Class']=Classifier

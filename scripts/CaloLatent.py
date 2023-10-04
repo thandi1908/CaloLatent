@@ -75,7 +75,7 @@ class CaloLatent(keras.Model):
         #Energy per layer model
         cond_layer = self.activation(layers.Dense(self.num_embed,activation=None)(inputs_cond))
         cond_layer = self.activation(layers.Dense(self.num_embed,activation=None)(tf.concat([cond_layer,layer_time],-1)))
-        inputs_layer,outputs_layer = self.ScoreModel(self.num_layer,cond_layer)
+        inputs_layer,outputs_layer = self.ScoreModel(self.num_layer,cond_layer, num_layer=3, mlp_dim=1024) #TODO: increase to match caloscore v2
         self.layer_energy = keras.models.Model([inputs_layer,inputs_time,inputs_cond], outputs_layer, name="score")
 
         
@@ -100,6 +100,10 @@ class CaloLatent(keras.Model):
         #Learn the mixture between normal and non-normal components
         self.mixing_logit = tf.Variable(tf.zeros((self.latent_dim)),trainable=True) 
 
+        if hvd.rank() == 0:
+            print(self.encoder.summary())
+            print(self.decoder.summary())
+        
         # if self.verbose:
         #     print(self.encoder.summary())
         #     print(self.decoder.summary())
@@ -118,6 +122,7 @@ class CaloLatent(keras.Model):
         self.num_embed = self.config['EMBED']
         self.projection_dim = self.config['NOISE_DIM'] #latent space dimensionality
         self.num_steps = self.config['NSTEPS']
+        self.num_layer_steps = self.config['NLAYERSTEPS']
         self.num_layer = self.config['NLAYER']
         self.snr=self.config['SNR']
     
@@ -639,10 +644,13 @@ class CaloLatent(keras.Model):
 
         dim = np.random.randint(0,self.latent_dim)
 
+        # predictor corrector: currently not applying corrector
+        #TODO: 
+
         layer_energies = self.PCSampler([cond], batch_size = cond.shape[0],
                                         ndim=self.num_layer,
                                         model = self.layer_energy,
-                                        num_steps=self.num_steps,
+                                        num_steps=self.num_layer_steps,
                                         snr=self.snr).numpy()
         
         if sample_encoder:
@@ -665,7 +673,7 @@ class CaloLatent(keras.Model):
             
             latent = random_latent_vectors[:,dim]
 
-        mean,log_std= tf.split(self.decoder([random_latent_vectors,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
+        mean,log_std= tf.split(self.decoder([RLV,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
                             
         # print(tf.exp(std))
         # input()
