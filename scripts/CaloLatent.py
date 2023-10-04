@@ -40,12 +40,16 @@ class CaloLatent(keras.Model):
         self.sigma2_1 = 0.99
         self.beta_0 = 0.1
         self.beta_1 = 20.0
+        self.model_name = name
+        self.current_epoch = None
 
         self.activation = tf.keras.activations.swish
         
-        self.kl_steps=500*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
-        self.warm_up_steps = 500*624//hvd.size() #number of steps to train the VAE alone
-        self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank        
+        self.kl_steps= 500*624//hvd.size() if self.model_name=="vae_only" else 500*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
+        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 500*624//hvd.size()  #number of steps to train the VAE alone
+        self.vae_beta = 1.0 if self.model_name =="vae_only" else 1
+        self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank
+                
 
         if len(self.data_shape) == 2:
             self.shape = (-1,1,1)
@@ -154,7 +158,7 @@ class CaloLatent(keras.Model):
                 stride=2,
                 kernel=3,
                 block_depth = 2,
-                widths = [32,64,96],
+                widths = [64,128,256],
                 attentions = [False,False,True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
@@ -164,12 +168,12 @@ class CaloLatent(keras.Model):
 
             # print("last",layer_encoded)
             
-            z_mean = layers.Conv3D(4,kernel_size=1,padding="same",
+            z_mean = layers.Conv3D(self.projection_dim,kernel_size=1,padding="same",
                                    kernel_initializer=initializers.Zeros(),
                                    bias_initializer=initializers.Zeros(),
                                    strides=1,activation=None,use_bias=True)(outputs)
         
-            z_log_sig = layers.Conv3D(4,kernel_size=1,padding="same",
+            z_log_sig = layers.Conv3D(self.projection_dim,kernel_size=1,padding="same",
                                       kernel_initializer=initializers.Zeros(),
                                       bias_initializer=initializers.Zeros(),
                                       strides=1,activation=None,use_bias=True)(outputs)
@@ -219,7 +223,7 @@ class CaloLatent(keras.Model):
                 stride=2,
                 kernel=3,
                 block_depth = 2,
-                widths = [32,64,96],
+                widths = [64,128,256],
                 attentions = [False,False, True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
@@ -244,7 +248,7 @@ class CaloLatent(keras.Model):
 
     
     def ScoreModel(self,ndim,time_embed,
-                   num_layer=3,mlp_dim=128):
+                   num_layer=3,mlp_dim=512):
         inputs,outputs = Resnet(ndim,
                                 time_embed,
                                 num_layer = num_layer,
@@ -393,7 +397,11 @@ class CaloLatent(keras.Model):
 
             
             #Simple linear scaling
-            beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
+            # beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
+            beta = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+                                 lambda: 1.0,
+                                 lambda:self.vae_beta
+                                 )
             total_loss = beta*kl_loss + reconstruction_loss
 
 
@@ -499,7 +507,11 @@ class CaloLatent(keras.Model):
         
         
         #Simple linear scaling
-        beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
+        # beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
+        beta = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
+                                 lambda: 1.0,
+                                 lambda:self.vae_beta
+                                 )
         total_loss = beta*kl_loss + reconstruction_loss
 
         

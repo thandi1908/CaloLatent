@@ -29,9 +29,28 @@ if __name__ == '__main__':
     parser.add_argument('--nevts', type=float,default=-1, help='Number of events to load')
     parser.add_argument('--frac', type=float,default=0.8, help='Fraction of total events used for training')
     parser.add_argument('--load', action='store_true', default=False,help='Load pretrained weights to continue the training')
+    parser.add_argument('--noise_dims', type=int,default=None, help='Factor to multiply base latent dims by')
+    parser.add_argument('--coordinates', type=str,default="", help='Which coordinate system is the data in')
     flags = parser.parse_args()
 
     config = utils.LoadJson(flags.config)
+
+    if flags.noise_dims:
+        config["NOISE_DIM"] = flags.noise_dims
+
+    print(f"Training with multiplier: {config['NOISE_DIM']}")
+    print(f"Training {flags.model}")
+    print(f"Using: {hvd.size()} GPUs")
+
+    if hvd.rank()==0:
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
+        if not os.path.exists(checkpoint_folder):
+            os.makedirs(checkpoint_folder)
+        
+        os.system('cp CaloLatent.py {}'.format(checkpoint_folder)) # bkp of model def
+        os.system('cp JSON/{} {}'.format(flags.config,checkpoint_folder)) # bkp of config file
+
+    
     data = []
     layers = []
     energies = []
@@ -112,7 +131,7 @@ if __name__ == '__main__':
         opt_vae = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_vae = hvd.DistributedOptimizer(
             opt_vae,average_aggregated_gradients=True)        
-        opt_sgm = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
+        opt_sgm = tf.keras.optimizers.legacy.Adam(LR*hvd.size())
         opt_sgm = hvd.DistributedOptimizer(
             opt_sgm,average_aggregated_gradients=True)
         opt_layer = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
@@ -130,8 +149,8 @@ if __name__ == '__main__':
         model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
 
     if hvd.rank()==0:
-        checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
-        checkpoint = ModelCheckpoint('{}/checkpoint'.format(checkpoint_folder),
+        checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
+        checkpoint = ModelCheckpoint(f"{checkpoint_folder}/"+"checkpoint-{epoch:02d}",
                                      save_best_only=False,mode='auto',
                                      period=1,save_weights_only=True)
         callbacks.append(checkpoint)
@@ -145,11 +164,3 @@ if __name__ == '__main__':
         verbose=2 if hvd.rank()==0 else 2,
         callbacks=callbacks
     )
-
-
-    if hvd.rank()==0:
-        checkpoint_folder = '../checkpoints_{}_{}'.format(config['CHECKPOINT_NAME'],flags.model)
-        if not os.path.exists(checkpoint_folder):
-            os.makedirs(checkpoint_folder)
-        os.system('cp CaloLatent.py {}'.format(checkpoint_folder)) # bkp of model def
-        os.system('cp JSON/{} {}'.format(flags.config,checkpoint_folder)) # bkp of config file

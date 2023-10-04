@@ -11,7 +11,7 @@
     'MAXEPOCH':500,
     'EARLYSTOP':20,
     'EMBED':64,
-    'CHECKPOINT_NAME':'dataset2',
+    'CHECKPOINT_NAME':'dataset2_end_to_end',
     'EMAX':100.,
     'EMIN':1.,
     'ECUT':0.0000151,
@@ -19,5 +19,5 @@
     'SNR':0.0,
     'logE':True,
     'MAXDEP':2,
-    'NOISE_DIM':100,
+    'NOISE_DIM':1,
 }
