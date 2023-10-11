@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, Input, initializers
+from tensorflow.keras.layers import TimeDistributed
 import horovod.tensorflow as hvd
 import utils
 import tensorflow_addons as tfa
@@ -140,7 +141,9 @@ class CaloLatent(keras.Model):
 
         #Learn the mixture between normal and non-normal components
         self.mixing_logit = tf.Variable(tf.zeros((self.latent_dim)),trainable=True) 
-
+        
+        print(self.encoder.summary())
+        print(self.decoder.summary())
         # if self.verbose:
         #     print(self.encoder.summary())
         #     print(self.decoder.summary())
@@ -207,15 +210,15 @@ class CaloLatent(keras.Model):
 
             # print("last",layer_encoded)
             
-            z_mean = layers.Conv3D(self.projection_dim,kernel_size=1,padding="same",
+            z_mean = TimeDistributed(layers.Conv2D(self.projection_dim,kernel_size=1,padding="same",
                                    kernel_initializer=initializers.Zeros(),
                                    bias_initializer=initializers.Zeros(),
-                                   strides=1,activation=None,use_bias=True)(outputs)
+                                   strides=1,activation=None,use_bias=True))(outputs)
         
-            z_log_sig = layers.Conv3D(self.projection_dim,kernel_size=1,padding="same",
+            z_log_sig = TimeDistributed(layers.Conv2D(self.projection_dim,kernel_size=1,padding="same",
                                       kernel_initializer=initializers.Zeros(),
                                       bias_initializer=initializers.Zeros(),
-                                      strides=1,activation=None,use_bias=True)(outputs)
+                                      strides=1,activation=None,use_bias=True))(outputs)
             
             self.init_shape = z_mean.shape[1:]            
             z_mean = layers.Flatten()(z_mean)
@@ -270,14 +273,14 @@ class CaloLatent(keras.Model):
                 use_1D=use_1D
             )
 
-        outputs_mean = layers.Conv3D(1,kernel_size=1,padding="same",
+        outputs_mean = TimeDistributed(layers.Conv2D(1,kernel_size=1,padding="same",
                                      kernel_initializer=initializers.Zeros(),
                                      bias_initializer=initializers.Zeros(),
-                                     strides=1,activation=None,use_bias=True)(outputs)
-        outputs_sigma = layers.Conv3D(1,kernel_size=1,padding="same",
+                                     strides=1,activation=None,use_bias=True))(outputs)
+        outputs_sigma = TimeDistributed(layers.Conv2D(1,kernel_size=1,padding="same",
                                       kernel_initializer=initializers.Zeros(),
                                       bias_initializer=initializers.Zeros(),
-                                      strides=1,activation=None,use_bias=True)(outputs)
+                                      strides=1,activation=None,use_bias=True))(outputs)
         # outputs_mean = layers.LeakyReLU(0.01)(outputs_mean)
         # outputs_sigma = soft_clamp(outputs_sigma)
         #outputs_mean = soft_clamp(outputs_mean,1)
@@ -568,9 +571,6 @@ class CaloLatent(keras.Model):
 
         self.sgm_optimizer.apply_gradients(zip(grads, self.latent_diffusion.trainable_weights+[self.mixing_logit]))
         self.score_loss_tracker.update_state(score_latent_loss)
-        
-        
-
 
         #Energy per Layer Diffusion
 
@@ -750,7 +750,10 @@ class CaloLatent(keras.Model):
             
             latent = random_latent_vectors[:,dim]
 
-        mean,log_std= tf.split(self.decoder([random_latent_vectors,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
+        mean,log_std= tf.split(self.decoder([RLV,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
+        
+        # loss = self.reconstruction_loss(data, mean, log_std, axis=(1,2,3,4))
+        # print(f"Batch Loss: {loss}")
                             
         # print(tf.exp(std))
         # input()
