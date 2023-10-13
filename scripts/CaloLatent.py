@@ -107,7 +107,7 @@ class CaloLatent(keras.Model):
         #Energy per layer model
         cond_layer = self.activation(layers.Dense(self.num_embed,activation=None)(inputs_cond))
         cond_layer = self.activation(layers.Dense(self.num_embed,activation=None)(tf.concat([cond_layer,layer_time],-1)))
-        inputs_layer,outputs_layer = self.ScoreModel(self.num_layer,cond_layer)
+        inputs_layer,outputs_layer = self.ScoreModel(self.num_layer,cond_layer, mlp_dim=1024)
         self.layer_energy = keras.models.Model([inputs_layer,inputs_time,inputs_cond], outputs_layer, name="score")
 
         
@@ -140,6 +140,9 @@ class CaloLatent(keras.Model):
 
         #Learn the mixture between normal and non-normal components
         self.mixing_logit = tf.Variable(tf.zeros((self.latent_dim)),trainable=True) 
+
+        # print(self.encoder.summary())
+        # print(self.decoder.summary())
 
         # if self.verbose:
         #     print(self.encoder.summary())
@@ -196,7 +199,7 @@ class CaloLatent(keras.Model):
                 input_embedding_dims = 32,
                 stride=2,
                 kernel=3,
-                block_depth = 2,
+                block_depth = 4,
                 widths = [64,128,256],
                 attentions= [False, False, True],
                 pad=self.config['PAD'],
