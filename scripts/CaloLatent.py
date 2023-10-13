@@ -81,7 +81,7 @@ class CaloLatent(keras.Model):
         
         self.kl_steps= 1000*624//hvd.size() if self.model_name=="vae_only" else 500*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
         self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 1000*624//hvd.size()  #number of steps to train the VAE alone
-        self.vae_beta = 1.0 if self.model_name =="vae_only" else 1e-6
+        self.vae_beta = 1.0 if self.model_name =="vae_only" else 1e-3
         self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank
         
         if len(self.data_shape) == 2:
@@ -108,7 +108,7 @@ class CaloLatent(keras.Model):
         #Energy per layer model
         cond_layer = self.activation(layers.Dense(self.num_embed,activation=None)(inputs_cond))
         cond_layer = self.activation(layers.Dense(self.num_embed,activation=None)(tf.concat([cond_layer,layer_time],-1)))
-        inputs_layer,outputs_layer = self.ScoreModel(self.num_layer,cond_layer)
+        inputs_layer,outputs_layer = self.ScoreModel(self.num_layer,cond_layer, mlp_dim=1024)
         self.layer_energy = keras.models.Model([inputs_layer,inputs_time,inputs_cond], outputs_layer, name="score")
 
         
@@ -199,7 +199,7 @@ class CaloLatent(keras.Model):
                 input_embedding_dims = 32,
                 stride=2,
                 kernel=3,
-                block_depth = 2,
+                block_depth = 4,
                 widths = [64,128,256],
                 attentions= [False, False, True],
                 pad=self.config['PAD'],
@@ -210,15 +210,15 @@ class CaloLatent(keras.Model):
 
             # print("last",layer_encoded)
             
-            z_mean = TimeDistributed(layers.Conv2D(self.projection_dim,kernel_size=1,padding="same",
+            z_mean = layers.Conv3D(self.projection_dim,kernel_size=1,padding="same",
                                    kernel_initializer=initializers.Zeros(),
                                    bias_initializer=initializers.Zeros(),
-                                   strides=1,activation=None,use_bias=True))(outputs)
+                                   strides=1,activation=None,use_bias=True)(outputs)
         
-            z_log_sig = TimeDistributed(layers.Conv2D(self.projection_dim,kernel_size=1,padding="same",
+            z_log_sig = layers.Conv3D(self.projection_dim,kernel_size=1,padding="same",
                                       kernel_initializer=initializers.Zeros(),
                                       bias_initializer=initializers.Zeros(),
-                                      strides=1,activation=None,use_bias=True))(outputs)
+                                      strides=1,activation=None,use_bias=True)(outputs)
             
             self.init_shape = z_mean.shape[1:]            
             z_mean = layers.Flatten()(z_mean)
@@ -273,14 +273,14 @@ class CaloLatent(keras.Model):
                 use_1D=use_1D
             )
 
-        outputs_mean = TimeDistributed(layers.Conv2D(1,kernel_size=1,padding="same",
+        outputs_mean = layers.Conv3D(1,kernel_size=1,padding="same",
                                      kernel_initializer=initializers.Zeros(),
                                      bias_initializer=initializers.Zeros(),
-                                     strides=1,activation=None,use_bias=True))(outputs)
-        outputs_sigma = TimeDistributed(layers.Conv2D(1,kernel_size=1,padding="same",
+                                     strides=1,activation=None,use_bias=True)(outputs)
+        outputs_sigma = layers.Conv3D(1,kernel_size=1,padding="same",
                                       kernel_initializer=initializers.Zeros(),
                                       bias_initializer=initializers.Zeros(),
-                                      strides=1,activation=None,use_bias=True))(outputs)
+                                      strides=1,activation=None,use_bias=True)(outputs)
         # outputs_mean = layers.LeakyReLU(0.01)(outputs_mean)
         # outputs_sigma = soft_clamp(outputs_sigma)
         #outputs_mean = soft_clamp(outputs_mean,1)

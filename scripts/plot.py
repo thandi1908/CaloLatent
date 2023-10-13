@@ -116,7 +116,7 @@ if flags.sample:
         layers_ = []
         m_latents = []
         t_latents = []
-        nsplit = 200
+        nsplit = 100
         split_energy = np.array_split(energies,nsplit)
         split_layer = np.array_split(layers, nsplit)
         split_data = np.array_split(data, nsplit)

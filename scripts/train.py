@@ -10,7 +10,7 @@ import utils
 import tensorflow_addons as tfa
 import gc
 import socket
-from CaloLatentFull import CaloLatent
+from CaloLatent import CaloLatent
 from architectures import EpochCallback
 
 if __name__ == '__main__':
@@ -138,7 +138,7 @@ if __name__ == '__main__':
         opt_vae = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_vae = hvd.DistributedOptimizer(
             opt_vae,average_aggregated_gradients=True)        
-        opt_sgm = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
+        opt_sgm = tf.keras.optimizers.legacy.Adam()
         opt_sgm = hvd.DistributedOptimizer(
             opt_sgm,average_aggregated_gradients=True)
         opt_layer = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
@@ -152,7 +152,7 @@ if __name__ == '__main__':
             layer_optimizer = opt_layer,
             vae_optimizer=opt_vae,
             sgm_optimizer=opt_sgm,
-            # decoder_optimizer=opt_dec        
+            decoder_optimizer=opt_dec       
         )
         
     if flags.load:
