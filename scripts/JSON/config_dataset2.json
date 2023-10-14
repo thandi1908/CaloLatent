@@ -11,7 +11,7 @@
     'MAXEPOCH':750,
     'EARLYSTOP':20,
     'EMBED':64,
-    'CHECKPOINT_NAME':'dataset2_time_distributed2',
+    'CHECKPOINT_NAME':'dataset2_time_distributed3',
     'EMAX':100.,
     'EMIN':1.,
     'ECUT':0.0000151,
