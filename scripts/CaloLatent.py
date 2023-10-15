@@ -750,7 +750,7 @@ class CaloLatent(keras.Model):
             
             latent = random_latent_vectors[:,dim]
 
-        mean,log_std= tf.split(self.decoder([RLV,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
+        mean,log_std= tf.split(self.decoder([random_latent_vectors,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
         
         # loss = self.reconstruction_loss(data, mean, log_std, axis=(1,2,3,4))
         # print(f"Batch Loss: {loss}")
