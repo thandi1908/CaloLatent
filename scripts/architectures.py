@@ -83,7 +83,7 @@ def Encoder(
             if use_1D:
                 x = layers.AveragePooling1D(pool_size=stride)(x)
             else:
-                x = layers.AveragePooling2D(pool_size=stride)(x)
+                x = layers.AveragePooling3D(pool_size=stride)(x)
             return x
 
         return forward
