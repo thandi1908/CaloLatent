@@ -39,7 +39,7 @@ def Encoder(
                 if use_1D:
                     residual = layers.Conv1D(width, kernel_size=1)(x)
                 else:
-                    residual = TimeDistributed(layers.Conv2D(width, kernel_size=1))(x)
+                    residual = layers.Conv3D(width, kernel_size=1)(x)
 
             n = layers.Dense(width)(n)
             #x = tfa.layers.GroupNormalization(groups=4)(x)
@@ -47,14 +47,14 @@ def Encoder(
             if use_1D:
                 x = layers.Conv1D(width, kernel_size=kernel, padding="same")(x)
             else:
-                x = TimeDistributed(layers.Conv2D(width, kernel_size=kernel, padding="same"))(x)
+                x = layers.Conv3D(width, kernel_size=kernel, padding="same")(x)
             x = layers.Add()([x, n])
             # x = tfa.layers.GroupNormalization(groups=4)(x)
             x = act(x)
             if use_1D:
                 x = layers.Conv1D(width, kernel_size=kernel, padding="same")(x)
             else:
-                x = TimeDistributed(layers.Conv2D(width, kernel_size=kernel, padding="same"))(x)
+                x = layers.Conv3D(width, kernel_size=kernel, padding="same")(x)
             x = layers.Add()([residual, x])
 
             if attention:
@@ -83,7 +83,7 @@ def Encoder(
             if use_1D:
                 x = layers.AveragePooling1D(pool_size=stride)(x)
             else:
-                x = TimeDistributed(layers.AveragePooling2D(pool_size=stride))(x)
+                x = layers.AveragePooling2D(pool_size=stride)(x)
             return x
 
         return forward
@@ -97,7 +97,7 @@ def Encoder(
         n = layers.Reshape((1,time_embedding.shape[-1]))(time_embedding)
     else:
         inputs_padded = layers.ZeroPadding3D(pad)(inputs)
-        x = TimeDistributed(layers.Conv2D(input_embedding_dims, kernel_size=1))(inputs_padded)
+        x = layers.Conv3D(input_embedding_dims, kernel_size=1)(inputs_padded)
         n = layers.Reshape((1,1,1,time_embedding.shape[-1]))(time_embedding)
     
     for width, attention in zip(widths[:-1], attentions[:-1]):

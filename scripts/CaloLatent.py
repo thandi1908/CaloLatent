@@ -196,10 +196,10 @@ class CaloLatent(keras.Model):
             inputs,outputs = Encoder(
                 self.data_shape,
                 cond_embed,
-                input_embedding_dims = 32,
+                input_embedding_dims = 64,
                 stride=2,
                 kernel=3,
-                block_depth = 2,
+                block_depth = 4,
                 widths = [64,128,256],
                 attentions= [False, False, True],
                 pad=self.config['PAD'],
@@ -294,7 +294,7 @@ class CaloLatent(keras.Model):
 
     
     def ScoreModel(self,ndim,time_embed,
-                   num_layer=3,mlp_dim=512):
+                   num_layer=3,mlp_dim=1024):
         inputs,outputs = Resnet(ndim,
                                 time_embed,
                                 num_layer = num_layer,
