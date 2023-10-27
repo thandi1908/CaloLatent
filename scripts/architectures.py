@@ -177,7 +177,7 @@ def Decoder(
             if use_1D:
                 x = layers.UpSampling1D(size=stride)(x)
             else:
-                x = TimeDistributed(layers.UpSampling2D(size=stride))(x)
+                x = layers.UpSampling3D(size=stride)(x)
             for _ in range(block_depth):
                 x = ResidualBlock(width, attention)([x,n])
             return x
