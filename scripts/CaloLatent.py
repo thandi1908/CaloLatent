@@ -144,10 +144,10 @@ class CaloLatent(keras.Model):
         # print(self.encoder.summary())
         # print(self.decoder.summary())
 
-        # if self.verbose:
-        #     print(self.encoder.summary())
-        #     print(self.decoder.summary())
-        #     print(self.latent_diffusion.summary())
+        if self.verbose:
+            print(self.encoder.summary())
+            print(self.decoder.summary())
+            print(self.latent_diffusion.summary())
 
 
         self.reconstruction_loss_tracker = keras.metrics.Mean(
@@ -196,12 +196,12 @@ class CaloLatent(keras.Model):
             inputs,outputs = Encoder(
                 self.data_shape,
                 cond_embed,
-                input_embedding_dims = 32,
+                input_embedding_dims = 64,
                 stride=2,
                 kernel=3,
-                block_depth = 4,
+                block_depth = 2,
                 widths = [64,128,256],
-                attentions= [False, False, True],
+                attentions= [False,False, True],
                 pad=self.config['PAD'],
                 use_1D=use_1D
             )
@@ -753,7 +753,7 @@ class CaloLatent(keras.Model):
             
             latent = random_latent_vectors[:,dim]
 
-        mean,log_std= tf.split(self.decoder([random_latent_vectors,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
+        mean,log_std= tf.split(self.decoder([RLV,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
                             
         # print(tf.exp(std))
         # input()

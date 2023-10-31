@@ -109,14 +109,14 @@ if flags.sample:
         hvd.init()
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
                            config=config, name=flags.model)
-        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint-529')).expect_partial()
+        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint-748')).expect_partial()
         start = time.time()        
         print("start sampling")
         voxels=[]
         layers_ = []
         m_latents = []
         t_latents = []
-        nsplit = 100
+        nsplit = 200 #100
         split_energy = np.array_split(energies,nsplit)
         split_layer = np.array_split(layers, nsplit)
         split_data = np.array_split(data, nsplit)
@@ -143,7 +143,7 @@ if flags.sample:
                 "vae_only": "VAE"
             }
             plt.figure()
-            _ = plt.hist(m_latent, bins=35, label=f"{dict_[flags.model]} Latent", color="orangered", alpha=0.5)
+            # _ = plt.hist(m_latent, bins=35, label=f"{dict_[flags.model]} Latent", color="orangered", alpha=0.5)
             _ = plt.hist(t_latent, bins=35, label="Ground Truth Latent", color="purple", alpha=0.5)
             plt.legend()
             plt.xlabel("Random Latent Dim")
@@ -182,8 +182,8 @@ else:
 
 
     if flags.model != 'all':
-        # models = [flags.model]
-        models = ["vae", "vae_only"]
+        models = [flags.model]
+        # models = ["vae", "vae_only"]
     else:
         #models = ['VPSDE','subVPSDE','VESDE','wgan','vae']
         models = [flags.model]
