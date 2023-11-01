@@ -78,8 +78,8 @@ class CaloLatent(keras.Model):
 
         self.activation = tf.keras.activations.swish
         
-        self.kl_steps= 1000*624//hvd.size() if self.model_name=="vae_only" else 500*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
-        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 1000*624//hvd.size()  #number of steps to train the VAE alone
+        self.kl_steps= 500*624//hvd.size() if self.model_name=="vae_only" else 500*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
+        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 500*624//hvd.size()  #number of steps to train the VAE alone
         self.vae_beta = 1.0 if self.model_name =="vae_only" else 1e-6
         self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank
         

@@ -7,7 +7,7 @@ import horovod.tensorflow.keras as hvd
 import argparse
 import h5py as h5
 import utils
-import tensorflow_addons as tfa
+#import tensorflow_addons as tfa
 import gc
 import socket
 from CaloLatent import CaloLatent
@@ -157,11 +157,11 @@ if __name__ == '__main__':
         
     if flags.load:
         checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model,config["NOISE_DIM"])
-        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
+        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint-128')).expect_partial()
 
     if hvd.rank()==0:
         checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
-        checkpoint = ModelCheckpoint(f"{checkpoint_folder}/"+"checkpoint-{epoch:02d}",
+        checkpoint = ModelCheckpoint(f"{checkpoint_folder}/"+"checkpoint",
                                      save_best_only=False,mode='auto',
                                      period=1,save_weights_only=True)
         callbacks.append(checkpoint)
