@@ -109,7 +109,9 @@ if flags.sample:
         hvd.init()
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
                            config=config, name=flags.model)
+
         model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
+
         start = time.time()        
         print("start sampling")
         voxels=[]
@@ -131,7 +133,7 @@ if flags.sample:
         layers = np.concatenate(layers_)
         end = time.time()
 
-        m_latent = np.concatenate(m_latents)
+        # m_latent = np.concatenate(m_latents)
         t_latent = np.concatenate(t_latents)
 
         print(end - start)
@@ -570,7 +572,7 @@ else:
         plot_routines['Shower width']=AverageShowerWidth        
         plot_routines['Energy per eta']=AverageEX
         plot_routines['Energy per phi']=AverageEY
-        # plot_routines['2D average shower']=Plot_Shower_2D
+        plot_routines['2D average shower']=Plot_Shower_2D
         plot_routines['Max voxel']=HistMaxELayer
         if run_classifier:
             plot_routines['Class']=Classifier

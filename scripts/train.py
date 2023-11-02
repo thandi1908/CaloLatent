@@ -137,7 +137,7 @@ if __name__ == '__main__':
         )
         opt_vae = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_vae = hvd.DistributedOptimizer(
-            opt_vae,average_aggregated_gradients=True)        
+            opt_vae,average_aggregated_gradients=True)
         opt_sgm = tf.keras.optimizers.legacy.Adam(learning_rate=LR*hvd.size())
         opt_sgm = hvd.DistributedOptimizer(
             opt_sgm,average_aggregated_gradients=True)
