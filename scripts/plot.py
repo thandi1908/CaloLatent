@@ -109,14 +109,14 @@ if flags.sample:
         hvd.init()
         model = CaloLatent(config['SHAPE'][1:],energies.shape[1],
                            config=config, name=flags.model)
-        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint-748')).expect_partial()
+        model.load_weights('{}/{}'.format(checkpoint_folder,'checkpoint')).expect_partial()
         start = time.time()        
         print("start sampling")
         voxels=[]
         layers_ = []
         m_latents = []
         t_latents = []
-        nsplit = 200 #100
+        nsplit = 100 #100
         split_energy = np.array_split(energies,nsplit)
         split_layer = np.array_split(layers, nsplit)
         split_data = np.array_split(data, nsplit)

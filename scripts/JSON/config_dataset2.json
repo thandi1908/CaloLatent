@@ -8,7 +8,7 @@
     'PAD':[[2,1],[0,0],[2,1]],
     'LR':1e-4,
     'LR_score':4e-4,
-    'MAXEPOCH':372,
+    'MAXEPOCH':750,
     'EARLYSTOP':20,
     'EMBED':64,
     'CHECKPOINT_NAME':'dataset2_ml4jets_test',

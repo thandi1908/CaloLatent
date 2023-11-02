@@ -79,7 +79,7 @@ class CaloLatent(keras.Model):
         self.activation = tf.keras.activations.swish
         
         self.kl_steps= 500*624//hvd.size() if self.model_name=="vae_only" else 500*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
-        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 500*624//hvd.size()  #number of steps to train the VAE alone
+        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 1000*624//hvd.size()  #number of steps to train the VAE alone
         self.vae_beta = 1.0 if self.model_name =="vae_only" else 1e-6
         self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank
         
@@ -730,7 +730,7 @@ class CaloLatent(keras.Model):
         layer_energies = self.PCSampler([cond], batch_size = cond.shape[0],
                                         ndim=self.num_layer,
                                         model = self.layer_energy,
-                                        num_steps=self.num_steps,
+                                        num_steps=512,
                                         snr=self.snr).numpy()
         
         if sample_encoder:
@@ -748,12 +748,12 @@ class CaloLatent(keras.Model):
                                                 ndim=self.latent_dim,
                                                 model=self.latent_diffusion,
                                                 use_mixing=True,
-                                                num_steps=self.num_steps,
+                                                num_steps=512,
                                                 snr=self.snr)
             
             latent = random_latent_vectors[:,dim]
 
-        mean,log_std= tf.split(self.decoder([RLV,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
+        mean,log_std= tf.split(self.decoder([random_latent_vectors,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
                             
         # print(tf.exp(std))
         # input()
