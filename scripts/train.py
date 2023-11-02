@@ -138,7 +138,7 @@ if __name__ == '__main__':
         opt_vae = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
         opt_vae = hvd.DistributedOptimizer(
             opt_vae,average_aggregated_gradients=True)        
-        opt_sgm = tf.keras.optimizers.legacy.Adam()
+        opt_sgm = tf.keras.optimizers.legacy.Adam(LR*hvd.size())
         opt_sgm = hvd.DistributedOptimizer(
             opt_sgm,average_aggregated_gradients=True)
         opt_layer = tf.keras.optimizers.legacy.Adamax(learning_rate=lr_schedule)
@@ -161,7 +161,7 @@ if __name__ == '__main__':
 
     if hvd.rank()==0:
         checkpoint_folder = '../checkpoints_{}_{}_ld{}'.format(config['CHECKPOINT_NAME'],flags.model, config["NOISE_DIM"])
-        checkpoint = ModelCheckpoint(f"{checkpoint_folder}/"+"checkpoint",
+        checkpoint = ModelCheckpoint(f"{checkpoint_folder}/"+"checkpoint-{epoch:02d}",
                                      save_best_only=False,mode='auto',
                                      period=1,save_weights_only=True)
         callbacks.append(checkpoint)

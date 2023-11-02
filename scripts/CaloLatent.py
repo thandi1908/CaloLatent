@@ -79,8 +79,8 @@ class CaloLatent(keras.Model):
         self.activation = tf.keras.activations.swish
         
         self.kl_steps= 500*624//hvd.size() if self.model_name=="vae_only" else 500*624//hvd.size() #Number of optimizer steps to take before kl is multiplied by 1
-        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 500*624//hvd.size()  #number of steps to train the VAE alone
-        self.vae_beta = 1.0 if self.model_name =="vae_only" else 1e-6
+        self.warm_up_steps = int(10e15*624//hvd.size()) if self.model_name =="vae_only" else 1000*624//hvd.size()  #number of steps to train the VAE alone
+        self.vae_beta = 1.0 if self.model_name =="vae_only" else 1e-3
         self.verbose = 1 if hvd.rank() == 0 else 0 #show progress only for first rank
         
         if len(self.data_shape) == 2:
@@ -294,7 +294,7 @@ class CaloLatent(keras.Model):
 
     
     def ScoreModel(self,ndim,time_embed,
-                   num_layer=3,mlp_dim=512):
+                   num_layer=4,mlp_dim=512):
         inputs,outputs = Resnet(ndim,
                                 time_embed,
                                 num_layer = num_layer,
@@ -496,11 +496,7 @@ class CaloLatent(keras.Model):
             kl_loss = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
                               lambda: kl_loss_joint,lambda:kl_loss_disjoint)
 
-            kl_loss = tf.reduce_mean(kl_loss)
-            
-            #Simple linear scaling
-            # if self.model_name=="vae_only":
-            #     self.vae_beta = tf.math.minimum(1.0,tf.cast(self.vae_optimizer.iterations,tf.float32)/self.kl_steps)
+            kl_loss = tf.reduce_mean(kl_loss_disjoint)
             
             beta = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
                                  lambda: 0.0,
@@ -512,22 +508,9 @@ class CaloLatent(keras.Model):
                                  lambda: 0.0,
                                  lambda:total_loss
                                  )
-            # discriminator losses
-            # real_output = self.discriminator([voxel], training=True)
-            # fake_output = self.discriminator([rec], training=True)
-
-            # gen_loss = self.generator_loss(fake_output)
-            # disc_loss = self.discriminator_loss(real_output, fake_output)
-
-            # total_loss = beta*kl_loss + reconstruction_loss + 20*gen_loss
-        
-        # vae_weights = self.encoder.trainable_weights + self.decoder.trainable_weights 
 
         encoder_weights = self.encoder.trainable_weights
         decoder_weights = self.decoder.trainable_weights
-
-        # vae_weights = tf.cond(self.warm_up_steps < self.sgm_optimizer.iterations,
-        #                     lambda: self.decoder.trainable_weights, lambda: self.encoder.trainable_weights + self.decoder.trainable_weights)
 
         grads = tape.gradient(total_loss, encoder_weights)
         grads = [tf.clip_by_norm(grad, 1)
@@ -538,9 +521,6 @@ class CaloLatent(keras.Model):
         tf.cond(self.warm_up_steps == self.sgm_optimizer.iterations,
             lambda: self.reset_opt(self.vae_optimizer), lambda: tf.constant(10))
         
-        # tf.cond(self.warm_up_steps == self.sgm_optimizer.iterations,
-        #         lambda: self.set_encoder_trainable(False) , lambda: tf.constant(10))
-
         dec_gradients = dec_tape.gradient(reconstruction_loss, decoder_weights)
 
         dec_gradients = [tf.clip_by_norm(grad, 1)
@@ -550,8 +530,6 @@ class CaloLatent(keras.Model):
 
         self.reconstruction_loss_tracker.update_state(reconstruction_loss)
         self.kl_loss_tracker.update_state(beta*kl_loss)
-        # self.discriminator_loss_tracker.update_state(disc_loss)
-        # self.generator_loss_tracker.update_state(20*gen_loss)
 
         #Latent Diffusion training
 
@@ -730,7 +708,7 @@ class CaloLatent(keras.Model):
         layer_energies = self.PCSampler([cond], batch_size = cond.shape[0],
                                         ndim=self.num_layer,
                                         model = self.layer_energy,
-                                        num_steps=self.num_steps,
+                                        num_steps=512,
                                         snr=self.snr).numpy()
         
         if sample_encoder:
@@ -743,22 +721,24 @@ class CaloLatent(keras.Model):
             )
             latent = random_latent_vectors[:,dim]
         elif self.model_name == "vae":
-            random_latent_vectors =self.PCSampler([cond,layer_energies],
-                                                batch_size = cond.shape[0],
-                                                ndim=self.latent_dim,
-                                                model=self.latent_diffusion,
-                                                use_mixing=True,
-                                                num_steps=self.num_steps,
-                                                snr=self.snr)
+            pass
+            # random_latent_vectors =self.PCSampler([cond,layer_energies],
+            #                                     batch_size = cond.shape[0],
+            #                                     ndim=self.latent_dim,
+            #                                     model=self.latent_diffusion,
+            #                                     use_mixing=True,
+            #                                     num_steps=self.num_steps,
+            #                                     snr=self.snr)
             
-            latent = random_latent_vectors[:,dim]
+            # latent = random_latent_vectors[:,dim]
 
         mean,log_std= tf.split(self.decoder([RLV,cond,layer_energies], training=False),num_or_size_splits=2, axis=-1)
                             
         # print(tf.exp(std))
         # input()
         if sample_encoder:
-            return mean,layer_energies, latent, RLV[:,dim]
+            # return mean,layer_energies, latent, RLV[:,dim]
+            return mean,layer_energies, 0, RLV[:,dim]
         else:
            return mean,layer_energies, latent 
 
